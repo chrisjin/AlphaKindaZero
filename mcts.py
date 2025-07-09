@@ -29,6 +29,17 @@ class MCTSNode:
         self.policy: Optional[np.ndarray] = None
         self.v: Optional[float] = None
     
+    def pick_next_move(self) -> int:
+        return np.argmax(self.children_N)
+    
+    def commit_next_move(self) -> MCTSNode:
+        action = self.pick_next_move()
+        row, col = self.board.unflatten_index(action)
+        new_board = copy.deepcopy(self.board)
+        child_node = self.children_index[action]
+        child_node.reset_as_root();
+        return child_node
+
     def partial_reset(self):
         self.children_W = np.zeros(self.children_size, dtype=np.float32)
         self.children_N = np.zeros(self.children_size, dtype=np.float32)
@@ -64,7 +75,7 @@ class MCTSNode:
         # print(f"{formula}\n")
 
         action = np.argmax(formula)
-        row, col = np.unravel_index(action, self.board.get_current_board().shape)
+        row, col = self.board.unflatten_index(action)
 
         new_board = copy.deepcopy(self.board)
         new_board.play_step(row, col)
@@ -134,21 +145,27 @@ def main():
 
         return pi, v
     root = MCTSNode(action_count, eval_position, board, 1);
-    sim_count = 0;
-    while sim_count < 1600:
-        tmp = root
+
+    for i in range(0, 5):
+        sim_count = 0;
         while sim_count < 1600:
-            child, leaf = tmp.expand(1)
-            tmp = child
-            sim_count += 1
-            res = child.get_result()
-            if leaf or res is not GameResult.UNDECIDED:
-                b = child.get_board().render();
-                print(b)
-                print(res)
-                break
-    print(root.children_N[:-1].reshape(size, size))
-    print(root.children_Q[:-1].reshape(size, size))
+            tmp = root
+            while sim_count < 1600:
+                child, leaf = tmp.expand(1)
+                tmp = child
+                sim_count += 1
+                res = child.get_result()
+                if leaf or res is not GameResult.UNDECIDED:
+                    b = child.get_board().render();
+                    print(b)
+                    print(res)
+                    break
+        print(root.children_N[:-1].reshape(size, size))
+        print(root.children_Q[:-1].reshape(size, size))
+        next_node = root.commit_next_move()
+        b = next_node.get_board().render();
+        root = next_node
+        print(b)
 
 
 

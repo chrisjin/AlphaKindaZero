@@ -34,6 +34,12 @@ class Board:
         self.queue.push_board(self.current_board.copy())
         self.queue.set_player(self.to_play)
         return True
+    
+    def pass_move(self):
+        self.to_play = 3 - self.to_play  # Switch between 1 and 2
+        self.queue.push_board(self.current_board.copy())
+        self.queue.set_player(self.to_play)
+        return True
 
     def get_stack(self) -> np.ndarray:
         """Returns the full stack (history + player indicator)."""
@@ -83,3 +89,9 @@ class Board:
         for row in matrix:
             output.append(" ".join(["*" if val == 1 else ("O" if val == 2 else "-") for val in row]))
         return "\n".join(output)
+    
+    def flatten_pos(self, pos: Tuple[int, int]) -> int:
+        return np.ravel_multi_index(pos, self.get_current_board().shape)
+    
+    def unflatten_index(self, index: int) -> Tuple[int, int]:
+        return np.unravel_index(index, self.get_current_board().shape)
