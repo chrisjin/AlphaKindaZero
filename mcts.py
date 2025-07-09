@@ -30,16 +30,16 @@ class MCTSNode:
         self.v: Optional[float] = None
     
     def partial_reset(self):
-        self.children_W = np.zeros(children_size, dtype=np.float32)
-        self.children_N = np.zeros(children_size, dtype=np.float32)
-        self.children_Q = np.zeros(children_size, dtype=np.float32)
+        self.children_W = np.zeros(self.children_size, dtype=np.float32)
+        self.children_N = np.zeros(self.children_size, dtype=np.float32)
+        self.children_Q = np.zeros(self.children_size, dtype=np.float32)
         self.children_index: Mapping[int, MCTSNode] = {}
     
     def reset_as_root(self):
         self.partial_reset()
         self.parent = None
         self.root_to_play = self.board.get_current_player()
-        self.game_result = board.get_game_result(self.root_to_play);
+        self.game_result = self.board.get_game_result(self.root_to_play);
 
     def expand(self, c: float) -> Tuple[MCTSNode, bool]:
         input = self.board.get_stack()
@@ -79,9 +79,11 @@ class MCTSNode:
         tmp = self
         while tmp is not None:
             tmp.children_N[action] += 1
-            if self.to_play == self.root_to_play:
+            if tmp.to_play == self.root_to_play:
+                print(f"+{v}\n")
                 tmp.children_W[action] += v
             else:
+                print(f"-{v}\n")
                 tmp.children_W[action] -= v
             tmp.children_Q[action] = tmp.children_W[action] / tmp.children_N[action]
             tmp = tmp.parent
@@ -146,6 +148,8 @@ def main():
                 print(res)
                 break
     print(root.children_N[:-1].reshape(size, size))
+    print(root.children_Q[:-1].reshape(size, size))
+
 
 
 if __name__ == '__main__':
