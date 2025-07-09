@@ -84,7 +84,6 @@ class Board:
         matrix = self.get_current_board()
         if not isinstance(matrix, np.ndarray):
             raise ValueError("Input must be a NumPy boolean array.")
-        print(f"{matrix.shape}")
         output = []
         for row in matrix:
             output.append(" ".join(["*" if val == 1 else ("O" if val == 2 else "-") for val in row]))
