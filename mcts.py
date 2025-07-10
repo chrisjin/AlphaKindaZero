@@ -28,13 +28,23 @@ class MCTSNode:
         self.board = board
         self.children_size = children_size
         self.game_result = board.get_game_result(root_to_play);
+
         self.last_action: Optional[int] = last_action 
         input = self.board.get_stack()
-        policy_arr, v_arr = self.policy_func(input)
-        v = v_arr[0];
-        policy = policy_arr[0];
-        self.v = v
-        self.policy = policy
+        winner = board.get_winner()
+        if winner is not None:
+            if winner == board.get_current_player():
+                self.v = 1.0
+            else:
+                self.v = -1.0
+            print(f"Got winner: {self.v}, {winner}, {board.get_current_player()}")
+
+        else:
+            policy_arr, v_arr = self.policy_func(input)
+            v = v_arr[0];
+            policy = policy_arr[0];
+            self.v = v
+            self.policy = policy
     
     def pick_next_move(self) -> int:
         return np.argmax(self.children_N)
@@ -71,7 +81,7 @@ class MCTSNode:
         row, col = self.board.unflatten_index(action)
 
 
-        leaf_node = False
+        is_new_node = False
         if action in self.children_index:
             new_node = self.children_index[action]
         else:
@@ -79,25 +89,39 @@ class MCTSNode:
             new_board.play_step(row, col)
             new_node = MCTSNode(self.children_size, self.policy_func, new_board, self.root_to_play, self, action)
             self.children_index[action] = new_node
-            leaf_node = True
+            is_new_node = True
 
-        if leaf_node is True:
-            tmp_child = new_node
-            v = new_node.v
-            tmp_parent = self
-            while tmp_parent is not None:
-                tmp_parent.children_N[tmp_child.last_action] += 1
-                tmp_parent.N += 1
-                if tmp_parent.to_play == self.root_to_play:
-                    tmp_parent.children_W[tmp_child.last_action] += v
-                else:
-                    tmp_parent.children_W[tmp_child.last_action] -= v
-                tmp_parent.children_Q[tmp_child.last_action] = tmp_parent.children_W[tmp_child.last_action] / tmp_parent.children_N[tmp_child.last_action]
-                tmp_child = tmp_parent
-                tmp_parent = tmp_parent.parent
-
-        return (new_node, leaf_node)
+        return (new_node, is_new_node)
     
+    def expand_until_leaf_or_terminal(self, limit: int, c: float) -> Tuple[MCTSNode, int]:
+        tmp = self
+        steps = 1
+        while limit > 0:
+            if tmp.get_result() is not GameResult.UNDECIDED:
+                return (tmp, steps)
+            next, is_new_node = tmp.expand(c)
+            if is_new_node:
+                return (next, steps)
+            tmp = next
+            limit -= 1
+            steps += 1
+        return (tmp, steps)
+    
+    def back_update(self):
+        tmp_child = self
+        v = self.v
+        tmp_parent = self.parent
+        while tmp_parent is not None:
+            tmp_parent.children_N[tmp_child.last_action] += 1
+            tmp_parent.N += 1
+            if tmp_parent.to_play == self.root_to_play:
+                tmp_parent.children_W[tmp_child.last_action] -= v
+            else:
+                tmp_parent.children_W[tmp_child.last_action] += v
+            tmp_parent.children_Q[tmp_child.last_action] = tmp_parent.children_W[tmp_child.last_action] / tmp_parent.children_N[tmp_child.last_action]
+            tmp_child = tmp_parent
+            tmp_parent = tmp_parent.parent
+
     def get_result(self) -> GameResult:
         return self.game_result
     
@@ -151,22 +175,12 @@ def main():
     root = MCTSNode(action_count, eval_position, board, 1);
 
     for i in range(0, 13 * 13):
-        sim_count = 0;
-        start_time = time.time()
-
-        while sim_count < 1600:
-            tmp = root
-            while sim_count < 1600:
-                child, leaf = tmp.expand(1)
-                tmp = child
-                sim_count += 1
-                res = child.get_result()
-                if leaf or res is not GameResult.UNDECIDED:
-                    b = child.get_board().render();
-                    print("n", end="")
-                    # print(b)
-                    # print(res)
-                    break
+        sim_count = 1600;
+        while sim_count > 0:
+            start_time = time.time()
+            node, count = root.expand_until_leaf_or_terminal(sim_count, 1)
+            sim_count -= count
+            node.back_update()
         end_time = time.time()
 
         print(root.children_N[:-1].reshape(size, size))
