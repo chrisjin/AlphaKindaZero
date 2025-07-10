@@ -176,8 +176,9 @@ def main():
 
     for i in range(0, 13 * 13):
         sim_count = 1600;
+        start_time = time.time()
+
         while sim_count > 0:
-            start_time = time.time()
             node, count = root.expand_until_leaf_or_terminal(sim_count, 1)
             sim_count -= count
             node.back_update()
