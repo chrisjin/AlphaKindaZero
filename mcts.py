@@ -37,8 +37,6 @@ class MCTSNode:
                 self.v = 1.0
             else:
                 self.v = -1.0
-            print(f"Got winner: {self.v}, {winner}, {board.get_current_player()}")
-
         else:
             policy_arr, v_arr = self.policy_func(input)
             v = v_arr[0];
@@ -114,10 +112,10 @@ class MCTSNode:
         while tmp_parent is not None:
             tmp_parent.children_N[tmp_child.last_action] += 1
             tmp_parent.N += 1
-            if tmp_parent.to_play == self.root_to_play:
-                tmp_parent.children_W[tmp_child.last_action] -= v
-            else:
+            if tmp_parent.to_play == self.to_play:
                 tmp_parent.children_W[tmp_child.last_action] += v
+            else:
+                tmp_parent.children_W[tmp_child.last_action] -= v
             tmp_parent.children_Q[tmp_child.last_action] = tmp_parent.children_W[tmp_child.last_action] / tmp_parent.children_N[tmp_child.last_action]
             tmp_child = tmp_parent
             tmp_parent = tmp_parent.parent
@@ -175,7 +173,7 @@ def main():
     root = MCTSNode(action_count, eval_position, board, 1);
 
     for i in range(0, 13 * 13):
-        sim_count = 1600;
+        sim_count = 200;
         start_time = time.time()
 
         while sim_count > 0:
@@ -194,6 +192,7 @@ def main():
 
         res = root.get_result()
         if res is not GameResult.UNDECIDED:
+            print(f"winner: {root.get_board().get_winner()}")
             break
 
 
