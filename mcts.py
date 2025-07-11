@@ -2,14 +2,19 @@ from __future__ import annotations
 
 import copy
 from enum import Enum, auto
+import math
 import time
 from typing import Callable, Iterable, Mapping, Optional, Tuple
 import numpy as np
 import torch
+from torch import nn
+import torch.nn.functional as F
 
 from alphago_nn import AlphaZeroNet
 from board import Board, GameResult
 from five_in_a_row_board import FiveInARowBoard
+from model_manager import ModelCheckpointManager
+from training_sample_queue import ReplayBuffer, SelfPlayGameBuffer
 
 
 
@@ -82,6 +87,16 @@ class MCTSNode:
             print("not dirty!")
         return (self.formula, self.action)
 
+    def get_training_pi(self, temperature: float) -> np.ndarray:
+        N = np.array(self.children_N, dtype=np.float32)
+        N_power = np.power(N, 1.0 / temperature)
+        total = np.sum(N_power)
+
+        if total == 0:
+            return np.full_like(N, fill_value=1.0 / N.size)
+
+        pi = N_power / total
+        return pi
 
     def expand(self, c: float) -> Tuple[MCTSNode, bool]:
         policy = self.policy
@@ -149,22 +164,17 @@ class MCTSNode:
     
     def get_board(self) -> Board: 
         return self.board
-    
 
-def main():
-    # device = torch.device("cpu")
-    if torch.backends.mps.is_available():
-        print("Init for mac")
-        device = torch.device("mps")
-    else:
-        print("User cpu")
-        device = torch.device("cpu")
-    size = 11;
-    input_dim = (17, size, size)
+size = 11;
+input_dim = (17, size, size)
+action_count = size * size + 1
+
+def play_one_game(device: torch.device, inference_model: nn.Module) -> SelfPlayGameBuffer:
+    game_buffer = SelfPlayGameBuffer()
+
     board = FiveInARowBoard((size, size), 16)
     b = board.render();
-    action_count = size * size + 1
-    network = AlphaZeroNet(input_dim, action_count).to(device)
+    network = inference_model
     @torch.no_grad()
     def eval_position(
         state: np.ndarray,
@@ -207,6 +217,7 @@ def main():
 
         print(root.children_N[:-1].reshape(size, size))
         print(root.children_Q[:-1].reshape(size, size))
+        game_buffer.add_sample(root.get_board().get_stack(), root.get_training_pi(1.0), root.get_board().get_current_player())
         next_node = root.commit_next_move()
         b = next_node.get_board().render();
         root = next_node
@@ -216,7 +227,141 @@ def main():
         res = root.get_result()
         if res is not GameResult.UNDECIDED:
             print(f"winner: {root.get_board().get_winner()}")
+            game_buffer.finalize_game(root.get_board().get_winner())
+
             break
+    return game_buffer
+
+def compute_losses(network, state, target_pi, target_v) -> Tuple[torch.Tensor, torch.Tensor]:
+    pred_pi_logits, pred_v = network(state)
+
+    # Policy cross-entropy loss
+    policy_loss = F.cross_entropy(pred_pi_logits, target_pi, reduction='mean')
+
+    # State value MSE loss
+    value_loss = F.mse_loss(pred_v.squeeze(), target_v, reduction='mean')
+
+    return policy_loss, value_loss
+
+
+def train_one_batch(replay_buffer: ReplayBuffer, model: nn.Module, lr_scheduler: torch.optim.lr_scheduler.MultiStepLR, 
+          optimizer: torch.optim.Optimizer,
+          device: torch.device):
+    states, policies, values = replay_buffer.sample_batch()
+    
+    states = torch.from_numpy(states).float().to(device)         # (B, C, H, W)
+    policies = torch.from_numpy(policies).float().to(device)     # (B, A)
+    values = torch.from_numpy(values).float().to(device)         # (B, 1)
+    pi_loss, v_loss = compute_losses(model, states, policies, values)
+    loss = pi_loss + v_loss
+    loss.backward()
+    optimizer.step()
+    lr_scheduler.step()
+    stats = {
+        'policy_loss': pi_loss.detach().item(),
+        'value_loss': v_loss.detach().item(),
+        "total_loss": loss.detach().item(),
+        'learning_rate': lr_scheduler.get_last_lr()[0],
+        'total_samples': len(replay_buffer),
+    }
+    print(f"{stats}")
+
+
+def main():
+    input_dim = (17, size, size)
+
+    # device = torch.device("cpu")
+    if torch.backends.mps.is_available():
+        print("Init for mac")
+        device = torch.device("mps")
+    else:
+        print("User cpu")
+        device = torch.device("cpu")
+    
+    model_manager = ModelCheckpointManager(type(AlphaZeroNet), "/Users/shikaijin/Desktop/projects/Models/first")
+
+    replay_buffer = ReplayBuffer(20000, 32)
+    infer_model = AlphaZeroNet(input_dim, action_count).to(device)
+    weights = model_manager.load_latest(device)
+    if weights is not None:
+        infer_model.load_state_dict(weights)
+
+    for i in range(0, 10):
+        game = play_one_game(device, infer_model)
+        replay_buffer.add_game(game)
+    
+    network = AlphaZeroNet(input_dim, action_count).to(device)
+    optimizer = torch.optim.SGD(
+        network.parameters(),
+        lr=1e-4,
+        momentum=0.9,
+        weight_decay=1e-4,
+    )
+    lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[100000, 200000], gamma=0.1)
+    print("Start training!!!!!!")
+    for i in range(0, 20 * math.ceil(len(replay_buffer) / 32 * 2)):
+        train_one_batch(replay_buffer, network, lr_scheduler, optimizer, device)   
+    print("Saving model!!!!!!")
+    model_manager.save(network) 
+
+    # size = 11;
+    # input_dim = (17, size, size)
+    # board = FiveInARowBoard((size, size), 16)
+    # b = board.render();
+    # action_count = size * size + 1
+    # network = AlphaZeroNet(input_dim, action_count).to(device)
+    # @torch.no_grad()
+    # def eval_position(
+    #     state: np.ndarray,
+    # ) -> Tuple[Iterable[np.ndarray], Iterable[float]]:
+    #     """Give a game state tensor, returns the action probabilities
+    #     and estimated state value from current player's perspective."""
+    #     state = np.expand_dims(state, axis=0)
+    #     state = torch.from_numpy(state).to(dtype=torch.float32, device=device, non_blocking=True)
+
+    #     pi_logits, v = network(state)
+
+    #     pi_logits = torch.detach(pi_logits)
+    #     v = torch.detach(v)
+
+    #     pi = torch.softmax(pi_logits, dim=-1).cpu().numpy()
+    #     v = v.cpu().numpy()
+
+    #     B, *_ = state.shape
+
+    #     v = np.squeeze(v, axis=1)
+    #     v = v.tolist()  # To list
+
+
+    #     # pi = pi[0]
+    #     # v = v[0]
+
+
+    #     return pi, v
+    # root = MCTSNode(action_count, eval_position, board, 1);
+
+    # for i in range(0, 13 * 13):
+    #     sim_count = 200;
+    #     start_time = time.time()
+
+    #     while sim_count > 0:
+    #         node, count = root.expand_until_leaf_or_terminal(sim_count, 1)
+    #         sim_count -= count
+    #         node.back_update()
+    #     end_time = time.time()
+
+    #     print(root.children_N[:-1].reshape(size, size))
+    #     print(root.children_Q[:-1].reshape(size, size))
+    #     next_node = root.commit_next_move()
+    #     b = next_node.get_board().render();
+    #     root = next_node
+    #     print(f"===<commited one move> time {end_time - start_time}=====")
+    #     print(b)
+
+    #     res = root.get_result()
+    #     if res is not GameResult.UNDECIDED:
+    #         print(f"winner: {root.get_board().get_winner()}")
+    #         break
 
 
 
