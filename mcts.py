@@ -315,15 +315,17 @@ def main():
     #     replay_buffer.add_game(game)
     
     network = AlphaZeroNet(input_dim, action_count).to(device)
-    optimizer = torch.optim.SGD(
-        network.parameters(),
-        lr=1e-4,
-        momentum=0.9,
-        weight_decay=1e-4,
-    )
+    # optimizer = torch.optim.SGD(
+    #     network.parameters(),
+    #     lr=1e-4,
+    #     momentum=0.9,
+    #     weight_decay=1e-4,
+    # )
+    optimizer = torch.optim.Adam(network.parameters(), lr=1e-3, weight_decay=1e-4)
+
     lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[100000, 200000], gamma=0.1)
     print("Start training!!!!!!")
-    for i in range(0, 20 * math.ceil(len(replay_buffer) / 32 * 2)):
+    for i in range(0, 40 * math.ceil(len(replay_buffer) / 32 * 2)):
         train_one_batch(replay_buffer, network, lr_scheduler, optimizer, device)   
     print("Saving model!!!!!!")
     model_manager.save(network) 
