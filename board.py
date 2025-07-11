@@ -21,24 +21,34 @@ class Board:
         self.num_stack = num_stack
         self.queue = MatrixQueue(num_stack, size)
         self.current_board = np.zeros(size, dtype=np.float32)
+        self.black_board = np.zeros(size, dtype=np.float32)
+        self.white_board = np.zeros(size, dtype=np.float32)
         self.to_play = 1  # Player 1 goes first
         self.queue.push_board(self.current_board)
         self.queue.set_player(self.to_play)
+
+    def current_binary_board(self) -> np.ndarray:
+        if self.to_play == 1:
+            return self.black_board
+        elif self.to_play == 2:
+            return self.white_board
 
     def play_step(self, row: int, col: int) -> bool:
         """Attempt to play a move for the current player (1 or 2)."""
         if self.current_board[row, col] != 0:
             return False  # Invalid move
         self.current_board[row, col] = self.to_play
+        binary_board = self.current_binary_board()
+        binary_board[row, col] = 1
+        self.queue.set_player(self.to_play == 1)
         self.to_play = 3 - self.to_play  # Switch between 1 and 2
-        self.queue.push_board(self.current_board.copy())
-        self.queue.set_player(self.to_play)
+        self.queue.push_board(binary_board.copy())
         return True
     
     def pass_move(self):
+        self.queue.set_player(self.to_play == 1)
         self.to_play = 3 - self.to_play  # Switch between 1 and 2
-        self.queue.push_board(self.current_board.copy())
-        self.queue.set_player(self.to_play)
+        self.queue.push_board(self.current_binary_board().copy())
         return True
 
     def get_stack(self) -> np.ndarray:

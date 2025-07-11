@@ -172,7 +172,6 @@ def main():
         """Give a game state tensor, returns the action probabilities
         and estimated state value from current player's perspective."""
         state = np.expand_dims(state, axis=0)
-
         state = torch.from_numpy(state).to(dtype=torch.float32, device=device, non_blocking=True)
 
         pi_logits, v = network(state)
