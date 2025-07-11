@@ -53,6 +53,12 @@ class MCTSNode:
             self.v = v
             self.policy = policy
     
+    def add_noise(self):
+        alpha = 0.03
+        alphas = np.ones_like(self.policy) * alpha
+        noise = np.random.dirichlet(alphas)
+        self.policy = 0.75 * self.policy + 0.25 * noise
+        
     def pick_next_move(self) -> int:
         return np.argmax(self.children_N)
     
@@ -188,6 +194,7 @@ def play_one_game(device: torch.device, inference_model: nn.Module) -> SelfPlayG
 
         pi_logits = torch.detach(pi_logits)
         v = torch.detach(v)
+        # print(f"NN v: {v}, {pi_logits}")
 
         pi = torch.softmax(pi_logits, dim=-1).cpu().numpy()
         v = v.cpu().numpy()
@@ -208,7 +215,7 @@ def play_one_game(device: torch.device, inference_model: nn.Module) -> SelfPlayG
     for i in range(0, 13 * 13):
         sim_count = 200;
         start_time = time.time()
-
+        root.add_noise()
         while sim_count > 0:
             node, count = root.expand_until_leaf_or_terminal(sim_count, 1)
             sim_count -= count
@@ -252,6 +259,8 @@ def train_one_batch(replay_buffer: ReplayBuffer, model: nn.Module, lr_scheduler:
     states = torch.from_numpy(states).float().to(device)         # (B, C, H, W)
     policies = torch.from_numpy(policies).float().to(device)     # (B, A)
     values = torch.from_numpy(values).float().to(device)         # (B, 1)
+    optimizer.zero_grad()
+
     pi_loss, v_loss = compute_losses(model, states, policies, values)
     loss = pi_loss + v_loss
     loss.backward()
@@ -267,6 +276,20 @@ def train_one_batch(replay_buffer: ReplayBuffer, model: nn.Module, lr_scheduler:
     print(f"{stats}")
 
 
+def generate_replays(model_manager: ModelCheckpointManager, device: torch.device) -> ReplayBuffer:
+    replay_buffer = ReplayBuffer(20000, 32)
+    infer_model = AlphaZeroNet(input_dim, action_count).to(device)
+    weights = model_manager.load_latest(device)
+    if weights is not None:
+        print("loading weights")
+        infer_model.load_state_dict(weights)
+
+    for i in range(0, 10):
+        game = play_one_game(device, infer_model)
+        replay_buffer.add_game(game)
+    return replay_buffer
+
+
 def main():
     input_dim = (17, size, size)
 
@@ -280,15 +303,16 @@ def main():
     
     model_manager = ModelCheckpointManager(type(AlphaZeroNet), "/Users/shikaijin/Desktop/projects/Models/first")
 
-    replay_buffer = ReplayBuffer(20000, 32)
-    infer_model = AlphaZeroNet(input_dim, action_count).to(device)
-    weights = model_manager.load_latest(device)
-    if weights is not None:
-        infer_model.load_state_dict(weights)
+    replay_buffer = generate_replays(model_manager, device)
+    # replay_buffer = ReplayBuffer(20000, 32)
+    # infer_model = AlphaZeroNet(input_dim, action_count).to(device)
+    # weights = model_manager.load_latest(device)
+    # if weights is not None:
+    #     infer_model.load_state_dict(weights)
 
-    for i in range(0, 10):
-        game = play_one_game(device, infer_model)
-        replay_buffer.add_game(game)
+    # for i in range(0, 10):
+    #     game = play_one_game(device, infer_model)
+    #     replay_buffer.add_game(game)
     
     network = AlphaZeroNet(input_dim, action_count).to(device)
     optimizer = torch.optim.SGD(
