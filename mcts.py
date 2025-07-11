@@ -33,6 +33,7 @@ class MCTSNode:
         self.illegal_actions = np.logical_not(legal_actions)
 
         self.last_action: Optional[int] = last_action 
+        self.formula_dirty = True
         input = self.board.get_stack()
         winner = board.get_winner()
         if winner is not None:
@@ -67,18 +68,33 @@ class MCTSNode:
         self.parent = None
         self.root_to_play = self.board.get_current_player()
         self.game_result = self.board.get_game_result(self.root_to_play);
+    
+    def set_formula_dirty(self): 
+        self.formula_dirty = True 
+    
+    def calc_formula(self, c: float):
+        if self.formula_dirty:
+            self.formula = self.children_Q + c * self.policy * np.sqrt(self.N) / (1 + self.children_N)
+            self.formula[self.illegal_actions] = -1000
+            self.action = np.argmax(self.formula)
+            self.formula_dirty = False
+        else:
+            print("not dirty!")
+        return (self.formula, self.action)
+
 
     def expand(self, c: float) -> Tuple[MCTSNode, bool]:
         policy = self.policy
 
-        formula = self.children_Q + c * policy * np.sqrt(self.N) / (1 + self.children_N)
+        # formula = self.children_Q + c * policy * np.sqrt(self.N) / (1 + self.children_N)
         # legal_actions = self.board.get_legal_moves().flatten();
         # legal_actions = np.append(legal_actions, False);
-        illegal_actions = self.illegal_actions
-        formula[illegal_actions] = -1000
+        # illegal_actions = self.illegal_actions
+        # formula[illegal_actions] = -1000
         # print(f"{formula}\n")
+        # formula = self.calc_formula(1)
 
-        action = np.argmax(formula)
+        formula, action = self.calc_formula(1)
         row, col = self.board.unflatten_index(action)
 
 
@@ -123,6 +139,7 @@ class MCTSNode:
                 # print("-")
                 tmp_parent.children_W[tmp_child.last_action] -= v
             tmp_parent.children_Q[tmp_child.last_action] = tmp_parent.children_W[tmp_child.last_action] / tmp_parent.children_N[tmp_child.last_action]
+            tmp_parent.set_formula_dirty()
             tmp_child = tmp_parent
             tmp_parent = tmp_parent.parent
         # print("end back!")
