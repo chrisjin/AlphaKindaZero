@@ -28,6 +28,9 @@ class MCTSNode:
         self.board = board
         self.children_size = children_size
         self.game_result = board.get_game_result(root_to_play);
+        legal_actions = self.board.get_legal_moves().flatten();
+        legal_actions = np.append(legal_actions, False);
+        self.illegal_actions = np.logical_not(legal_actions)
 
         self.last_action: Optional[int] = last_action 
         input = self.board.get_stack()
@@ -69,9 +72,9 @@ class MCTSNode:
         policy = self.policy
 
         formula = self.children_Q + c * policy * np.sqrt(self.N) / (1 + self.children_N)
-        legal_actions = self.board.get_legal_moves().flatten();
-        legal_actions = np.append(legal_actions, False);
-        illegal_actions = np.logical_not(legal_actions)
+        # legal_actions = self.board.get_legal_moves().flatten();
+        # legal_actions = np.append(legal_actions, False);
+        illegal_actions = self.illegal_actions
         formula[illegal_actions] = -1000
         # print(f"{formula}\n")
 
@@ -109,16 +112,20 @@ class MCTSNode:
         tmp_child = self
         v = self.v
         tmp_parent = self.parent
+        # print(f"start back! {v}")
         while tmp_parent is not None:
             tmp_parent.children_N[tmp_child.last_action] += 1
             tmp_parent.N += 1
             if tmp_parent.to_play == self.to_play:
+                # print("+")
                 tmp_parent.children_W[tmp_child.last_action] += v
             else:
+                # print("-")
                 tmp_parent.children_W[tmp_child.last_action] -= v
             tmp_parent.children_Q[tmp_child.last_action] = tmp_parent.children_W[tmp_child.last_action] / tmp_parent.children_N[tmp_child.last_action]
             tmp_child = tmp_parent
             tmp_parent = tmp_parent.parent
+        # print("end back!")
 
     def get_result(self) -> GameResult:
         return self.game_result
