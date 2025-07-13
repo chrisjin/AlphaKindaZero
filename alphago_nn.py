@@ -29,12 +29,12 @@ def calc_conv2d_output(h_w, kernel_size=1, stride=1, pad=0, dilation=1):
 
 
 def initialize_weights(net: nn.Module) -> None:
-    """Initialize weights for Conv2d and Linear layers using kaming initializer."""
+    """Initialize weights for Conv2d and Linear layers using Xavier uniform initializer."""
     assert isinstance(net, nn.Module)
 
     for module in net.modules():
         if isinstance(module, (nn.Conv2d, nn.Linear)):
-            nn.init.kaiming_uniform_(module.weight, nonlinearity='relu')
+            nn.init.xavier_uniform_(module.weight)
 
             if module.bias is not None:
                 nn.init.zeros_(module.bias)

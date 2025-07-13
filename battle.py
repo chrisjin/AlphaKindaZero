@@ -710,7 +710,7 @@ def main():
     # Run comprehensive tournament for the latest 3 models
     tournament_result = run_comprehensive_tournament(
         model_manager=model_manager,
-        model_indices=[0, 1, 2],  # Latest 3 models
+        model_indices=range(0, 3),  # Latest 3 models
         games_per_match=4,  # 10 games per model pair
         board_size=(11, 11),
         sim_count=100,   # 100 sims per move

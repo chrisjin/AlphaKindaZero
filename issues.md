@@ -46,3 +46,5 @@ Rank Model  Wins   Losses   Draws  Games  Win Rate
 
 
 3. noise is too little,  didn't times that with number of actions. misunderstanding of  dirichlet     noise = num_legal_actions * np.random.dirichlet(alphas)
+
+4. use same parameters for optimizer

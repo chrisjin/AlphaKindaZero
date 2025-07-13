@@ -72,12 +72,12 @@ class MCTSNode:
             self.v = v
             self.policy = policy
     
-    def add_noise(self, alpha: float = 0.03):
-        num_legal_actions = np.sum(self.legal_actions)
+    def add_noise(self, alpha: float = 0.03, noise_ratio: float = 0.25):
+        # num_legal_actions = np.sum(self.legal_actions)
         alphas = np.ones_like(self.policy) * alpha
-        noise = num_legal_actions * np.random.dirichlet(alphas)
-        print(f"Noise: {noise}")
-        self.policy = 0.75 * self.policy + 0.25 * noise
+        noise = np.random.dirichlet(alphas)
+        print(f"Noise: {noise_ratio}, {noise}")
+        self.policy = (1 - noise_ratio) * self.policy + noise_ratio * noise
     
     def get_v(self):
         return self.v
@@ -265,8 +265,8 @@ def play_one_game(device: torch.device, inference_model: nn.Module) -> SelfPlayG
         sim_count = 400;
         print(f"Start sim {sim_count}")
         start_time = time.time()
-        if step_count <= 2:
-            root.add_noise(0.06)
+        if step_count < 2:
+            root.add_noise(1, 0.5)
         else:
             root.add_noise(0.03)
         print(f"Step {step_count}")
@@ -311,6 +311,9 @@ def compute_losses(network, state, target_pi, target_v) -> Tuple[torch.Tensor, t
 def train_one_batch(replay_buffer: ReplayBuffer, model: nn.Module, lr_scheduler: torch.optim.lr_scheduler.MultiStepLR, 
           optimizer: torch.optim.Optimizer,
           device: torch.device):
+    # Set model to training mode
+    model.train()
+    
     states, policies, values = replay_buffer.sample_batch()
     
     states = torch.from_numpy(states).float().to(device)         # (B, C, H, W)
@@ -319,7 +322,7 @@ def train_one_batch(replay_buffer: ReplayBuffer, model: nn.Module, lr_scheduler:
     optimizer.zero_grad()
 
     pi_loss, v_loss = compute_losses(model, states, policies, values)
-    loss = pi_loss + 0.5 * v_loss
+    loss = pi_loss + 0.25 * v_loss
     loss.backward()
     optimizer.step()
     lr_scheduler.step()
@@ -381,11 +384,8 @@ def train_on_latest_model_epoch(
 def generate_replays_and_train(
     replay_buffer: ReplayBuffer, 
     model_manager: ModelCheckpointManager, 
-    model: AlphaZeroNet,
     device: torch.device, 
     epoch: int,
-    lr_scheduler: torch.optim.lr_scheduler.MultiStepLR,
-    optimizer: torch.optim.Optimizer,
     tournament_games: int = 20,
     tournament_sims: int = 100,
     early_stop_lead: int = 5,
@@ -409,7 +409,9 @@ def generate_replays_and_train(
             device=device
         )
         training_model = load_latest_model(model_manager, device)
+        optimizer = torch.optim.Adam(training_model.parameters(), lr=1e-4, weight_decay=1e-4)
 
+        lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[100000, 200000], gamma=0.1)
         train_on_latest_model_epoch(replay_buffer, model_manager, training_model, device, epoch, lr_scheduler, optimizer)
         model_manager.save(training_model)
         
@@ -419,35 +421,39 @@ def generate_replays_and_train(
         # Import battle functions
         from battle import run_tournament_and_dump_loser
         
-        try:
-            tournament_result = run_tournament_and_dump_loser(
-                model_manager=model_manager,
-                model1_index=0,  # Current model (latest)
-                model2_index=1,  # Previous model
-                num_games=tournament_games,
-                board_size=(11, 11),
-                sim_count=tournament_sims,
-                temperature=1.0,
-                add_noise=True,
-                device=device,
-                dump_dir=dump_dir,
-                early_stop_lead=early_stop_lead
-            )
-            
-            # Check if the current model (index 0) lost
-            if tournament_result['dump_info']['winner_index'] == 1:  # Previous model won
-                print(f"💀 Current model (index 0) lost to previous model (index 1)")
-                print(f"🗑️  Current model was moved to {dump_dir}")
-                print(f"🔄 Continuing training with previous model...")
-            elif tournament_result['dump_info']['winner_index'] == 0:  # Current model won
-                print(f"✅ Current model (index 0) won against previous model (index 1)")
-                print(f"🗑️  Previous model was moved to {dump_dir}")
-            else:
-                print(f"🤝 Tournament ended in a tie - both models moved to {dump_dir}")
+        # Only run tournament if there are at least 2 models available
+        if len(model_manager.get_checkpoint_files()) > 1:
+            try:
+                tournament_result = run_tournament_and_dump_loser(
+                    model_manager=model_manager,
+                    model1_index=0,  # Current model (latest)
+                    model2_index=1,  # Previous model
+                    num_games=tournament_games,
+                    board_size=(11, 11),
+                    sim_count=tournament_sims,
+                    temperature=1.0,
+                    add_noise=True,
+                    device=device,
+                    dump_dir=dump_dir,
+                    early_stop_lead=early_stop_lead
+                )
                 
-        except Exception as e:
-            print(f"⚠️  Tournament failed: {e}")
-            print(f"🔄 Continuing training without tournament evaluation...")
+                # Check if the current model (index 0) lost
+                if tournament_result['dump_info']['winner_index'] == 1:  # Previous model won
+                    print(f"💀 Current model (index 0) lost to previous model (index 1)")
+                    print(f"🗑️  Current model was moved to {dump_dir}")
+                    print(f"🔄 Continuing training with previous model...")
+                elif tournament_result['dump_info']['winner_index'] == 0:  # Current model won
+                    print(f"✅ Current model (index 0) won against previous model (index 1)")
+                    print(f"🗑️  Previous model was moved to {dump_dir}")
+                else:
+                    print(f"🤝 Tournament ended in a tie - both models moved to {dump_dir}")
+                    
+            except Exception as e:
+                print(f"⚠️  Tournament failed: {e}")
+                print(f"🔄 Continuing training without tournament evaluation...")
+        else:
+            print("⚠️  Not enough models to run tournament (need at least 2). Skipping tournament evaluation.")
         
 
 def main():
@@ -466,9 +472,9 @@ def main():
     
     model_manager = ModelCheckpointManager(type(AlphaZeroNet), "/Users/sjin2/PPP/AlphaKindaZero/after-fix")
 
-    replay_buffer = ReplayBuffer(600, 32)
+    replay_buffer = ReplayBuffer(1000, 32)
     
-    network = load_latest_model(model_manager, device)
+    # network = load_latest_model(model_manager, device)
     # weights = model_manager.load_latest(device)
     # if weights is not None:
     #     print("loading weights")
@@ -479,20 +485,17 @@ def main():
     #     momentum=0.9,
     #     weight_decay=1e-4,
     # )
-    optimizer = torch.optim.Adam(network.parameters(), lr=1e-3, weight_decay=1e-4)
+    # optimizer = torch.optim.Adam(network.parameters(), lr=1e-3, weight_decay=1e-4)
 
-    lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[100000, 200000], gamma=0.1)
+    # lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[100000, 200000], gamma=0.1)
     
     # Start the training loop with tournament evaluation
     print("Start training with tournament evaluation!!!!!!")
     generate_replays_and_train(
         replay_buffer=replay_buffer,
         model_manager=model_manager,
-        model=network,
         device=device,
-        epoch=30,  # Train for 1 epoch per iteration
-        lr_scheduler=lr_scheduler,
-        optimizer=optimizer,
+        epoch=50,  # Train for 1 epoch per iteration
         tournament_games=20,
         tournament_sims=100,
         early_stop_lead=5,
