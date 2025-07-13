@@ -343,7 +343,7 @@ def run_tournament_with_early_stop(
     board_size: Tuple[int, int] = (11, 11),
     sim_count: int = 200,
     temperature: float = 1.0,
-    add_noise: bool = False,
+    add_noise: bool = True,
     device: torch.device = None,
     early_stop_lead: int = 5
 ) -> dict:
@@ -598,7 +598,7 @@ def run_tournament_and_dump_loser(
     board_size: Tuple[int, int] = (11, 11),
     sim_count: int = 100,
     temperature: float = 1.0,
-    add_noise: bool = False,
+    add_noise: bool = True,
     device: torch.device = None,
     dump_dir: str = "dump",
     early_stop_lead: int = 5
@@ -707,27 +707,26 @@ def main():
     model_manager = ModelCheckpointManager(type(AlphaZeroNet), 
         "/Users/sjin2/PPP/AlphaKindaZero/after-fix")
     
-    # Run tournament between models 0 and 1 with dump functionality
-    tournament_result = run_tournament_and_dump_loser(
+    # Run comprehensive tournament for the latest 3 models
+    tournament_result = run_comprehensive_tournament(
         model_manager=model_manager,
-        model1_index=0,
-        model2_index=1,
-        num_games=20,
+        model_indices=[0, 1, 2],  # Latest 3 models
+        games_per_match=4,  # 10 games per model pair
         board_size=(11, 11),
-        sim_count=100,
+        sim_count=100,   # 100 sims per move
         temperature=1.0,
-        add_noise=False,
-        device=None,  # Auto-detect
-        dump_dir="/Users/sjin2/PPP/AlphaKindaZero/after-fix-dump",
-        early_stop_lead=5
+        add_noise=True,  # Add noise for evaluation
+        device=None  # Auto-detect
     )
-
-    print(f"\n🎯 Tournament with dump completed!")
-    if tournament_result['dump_info']['winner_index'] is not None:
-        print(f"Winner: Model {tournament_result['dump_info']['winner_index']}")
-        print(f"Loser moved to: {tournament_result['dump_info']['dump_directory']}")
-    else:
-        print(f"Tie! Both models moved to: {tournament_result['dump_info']['dump_directory']}")
+    
+    print(f"\n🎯 Comprehensive tournament completed!")
+    print(f"Tournament involved {len(tournament_result['model_indices'])} models: {tournament_result['model_indices']}")
+    print(f"Total matches: {tournament_result['total_matches']}")
+    print(f"Total games: {tournament_result['total_games']}")
+    
+    # Find the best model
+    best_model = max(tournament_result['model_scores'].items(), key=lambda x: x[1]['wins'])[0]
+    print(f"🏆 Best model: Model {best_model}")
 
 
 if __name__ == "__main__":

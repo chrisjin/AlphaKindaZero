@@ -52,9 +52,9 @@ class MCTSNode:
         self.board = board
         self.children_size = children_size
         self.game_result = board.get_game_result(root_to_play);
-        legal_actions = self.board.get_legal_moves().flatten();
-        legal_actions = np.append(legal_actions, False);
-        self.illegal_actions = np.logical_not(legal_actions)
+        self.legal_actions = self.board.get_legal_moves().flatten();
+        self.legal_actions = np.append(self.legal_actions, False);
+        self.illegal_actions = np.logical_not(self.legal_actions)
 
         self.last_action: Optional[int] = last_action 
         self.formula_dirty = True
@@ -72,10 +72,11 @@ class MCTSNode:
             self.v = v
             self.policy = policy
     
-    def add_noise(self):
-        alpha = 0.03
+    def add_noise(self, alpha: float = 0.03):
+        num_legal_actions = np.sum(self.legal_actions)
         alphas = np.ones_like(self.policy) * alpha
-        noise = np.random.dirichlet(alphas)
+        noise = num_legal_actions * np.random.dirichlet(alphas)
+        print(f"Noise: {noise}")
         self.policy = 0.75 * self.policy + 0.25 * noise
     
     def get_v(self):
@@ -259,12 +260,16 @@ def play_one_game(device: torch.device, inference_model: nn.Module) -> SelfPlayG
 
         return pi, v
     root = MCTSNode(action_count, eval_position, board, 1);
-
+    step_count = 0
     for i in range(0, 13 * 13):
         sim_count = 400;
         print(f"Start sim {sim_count}")
         start_time = time.time()
-        root.add_noise()
+        if step_count <= 2:
+            root.add_noise(0.06)
+        else:
+            root.add_noise(0.03)
+        print(f"Step {step_count}")
         while sim_count > 0:
             node, count = root.expand_until_leaf_or_terminal(sim_count, 1)
             sim_count -= count
@@ -282,7 +287,7 @@ def play_one_game(device: torch.device, inference_model: nn.Module) -> SelfPlayG
         root = next_node
         print(f"===<commited one move> time {end_time - start_time}=====")
         print(b)
-
+        step_count += 1
         res = root.get_result()
         if res is not GameResult.UNDECIDED:
             print(f"winner: {root.get_board().get_winner()}")
@@ -423,7 +428,7 @@ def generate_replays_and_train(
                 board_size=(11, 11),
                 sim_count=tournament_sims,
                 temperature=1.0,
-                add_noise=False,
+                add_noise=True,
                 device=device,
                 dump_dir=dump_dir,
                 early_stop_lead=early_stop_lead

@@ -43,3 +43,6 @@ Rank Model  Wins   Losses   Draws  Games  Win Rate
 
 
 2. with sim = 200, new models always lose to model 20250712_190041 so increasing it to 400. After training, new model beats 20250712_190041, 5 to 0 immediately
+
+
+3. noise is too little,  didn't times that with number of actions. misunderstanding of  dirichlet     noise = num_legal_actions * np.random.dirichlet(alphas)
