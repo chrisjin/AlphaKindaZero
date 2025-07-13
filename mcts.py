@@ -165,6 +165,25 @@ class MCTSNode:
 
         return (new_node, is_new_node)
     
+    def simulate_one_step_and_make_move(self, sim_count: int) -> MCTSNode:
+        start_time = time.time()
+        self.add_noise()
+        while sim_count > 0:
+            node, count = self.expand_until_leaf_or_terminal(sim_count, 1)
+            sim_count -= count
+            node.back_update()
+        end_time = time.time()
+        print(self.children_N[:-1].reshape(size, size))
+        print(self.children_Q[:-1].reshape(size, size))
+        print(self.formula[:-1].reshape(size, size))
+        print(self.policy[:-1].reshape(size, size))
+        print(f"To play {self.get_board().get_current_player()}, V: {self.get_v()}")
+        next_node = self.commit_next_move()
+        b = next_node.get_board().render();
+        print(f"===<commited one move inference> time {end_time - start_time}=====")
+        print(b)
+        return next_node
+
     def expand_until_leaf_or_terminal(self, limit: int, c: float, action_fix = None) -> Tuple[MCTSNode, int]:
         tmp = self
         steps = 1
@@ -237,11 +256,6 @@ def play_one_game(device: torch.device, inference_model: nn.Module) -> SelfPlayG
 
         v = np.squeeze(v, axis=1)
         v = v.tolist()  # To list
-
-
-        # pi = pi[0]
-        # v = v[0]
-
 
         return pi, v
     root = MCTSNode(action_count, eval_position, board, 1);
