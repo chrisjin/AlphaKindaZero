@@ -76,7 +76,7 @@ class MCTSNode:
         # num_legal_actions = np.sum(self.legal_actions)
         alphas = np.ones_like(self.policy) * alpha
         noise = np.random.dirichlet(alphas)
-        print(f"Noise: {noise_ratio}, {noise}")
+        print(f"Noise: {noise_ratio}, alpha: {alpha}")
         self.policy = (1 - noise_ratio) * self.policy + noise_ratio * noise
     
     def get_v(self):
@@ -225,7 +225,7 @@ class MCTSNode:
     def get_board(self) -> Board: 
         return self.board
 
-size = 11;
+size = 8;
 input_dim = (17, size, size)
 action_count = size * size + 1
 
@@ -262,11 +262,11 @@ def play_one_game(device: torch.device, inference_model: nn.Module) -> SelfPlayG
     root = MCTSNode(action_count, eval_position, board, 1);
     step_count = 0
     for i in range(0, 13 * 13):
-        sim_count = 400;
+        sim_count = 100;
         print(f"Start sim {sim_count}")
         start_time = time.time()
         if step_count < 2:
-            root.add_noise(1, 0.5)
+            root.add_noise(0.05, 0.25)
         else:
             root.add_noise(0.03)
         print(f"Step {step_count}")
@@ -351,7 +351,7 @@ def generate_replays(
     replace_sample_count = 0
     total_games = 0
     print(f"Starting replay generation: buffer size={len(replay_buffer)}, max_samples={replay_buffer.max_samples}, max_replace_ratio={max_replace_sample_ratio}")
-    while (not replay_buffer.is_full()) or (replace_sample_count < max_replace_sample_ratio * replay_buffer.max_samples):
+    while (replace_sample_count < max_replace_sample_ratio * replay_buffer.max_samples):
         game = play_one_game(device, infer_model)
         added = replay_buffer.add_game(game)
         replace_sample_count += added
@@ -405,7 +405,7 @@ def generate_replays_and_train(
         replay_buffer = generate_replays(
             replay_buffer=replay_buffer,
             infer_model=infer_model,
-            max_replace_sample_ratio=0.75,
+            max_replace_sample_ratio=0.25,
             device=device
         )
         training_model = load_latest_model(model_manager, device)
@@ -429,7 +429,7 @@ def generate_replays_and_train(
                     model1_index=0,  # Current model (latest)
                     model2_index=1,  # Previous model
                     num_games=tournament_games,
-                    board_size=(11, 11),
+                    input_dim=input_dim,
                     sim_count=tournament_sims,
                     temperature=1.0,
                     add_noise=True,
@@ -460,7 +460,6 @@ def main():
     np.set_printoptions(formatter={'float': lambda x: "{0:0.3f}".format(x)})
     np.set_printoptions(linewidth=sys.maxsize) 
 
-    input_dim = (17, size, size)
 
     # device = torch.device("cpu")
     if torch.backends.mps.is_available():
@@ -470,96 +469,21 @@ def main():
         print("User cpu")
         device = torch.device("cpu")
     
-    model_manager = ModelCheckpointManager(type(AlphaZeroNet), "/Users/sjin2/PPP/AlphaKindaZero/after-fix")
+    model_manager = ModelCheckpointManager(type(AlphaZeroNet), "/Users/sjin2/PPP/AlphaKindaZero/8by8")
 
-    replay_buffer = ReplayBuffer(1000, 32)
-    
-    # network = load_latest_model(model_manager, device)
-    # weights = model_manager.load_latest(device)
-    # if weights is not None:
-    #     print("loading weights")
-    #     network.load_state_dict(weights)
-    # optimizer = torch.optim.SGD(
-    #     network.parameters(),
-    #     lr=1e-4,
-    #     momentum=0.9,
-    #     weight_decay=1e-4,
-    # )
-    # optimizer = torch.optim.Adam(network.parameters(), lr=1e-3, weight_decay=1e-4)
+    replay_buffer = ReplayBuffer(2000, 32)
 
-    # lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[100000, 200000], gamma=0.1)
-    
-    # Start the training loop with tournament evaluation
     print("Start training with tournament evaluation!!!!!!")
     generate_replays_and_train(
         replay_buffer=replay_buffer,
         model_manager=model_manager,
         device=device,
-        epoch=50,  # Train for 1 epoch per iteration
+        epoch=15,  # Train for 1 epoch per iteration
         tournament_games=20,
         tournament_sims=100,
         early_stop_lead=5,
-        dump_dir="/Users/sjin2/PPP/AlphaKindaZero/after-fix-dump"
-    ) 
-
-    # size = 11;
-    # input_dim = (17, size, size)
-    # board = FiveInARowBoard((size, size), 16)
-    # b = board.render();
-    # action_count = size * size + 1
-    # network = AlphaZeroNet(input_dim, action_count).to(device)
-    # @torch.no_grad()
-    # def eval_position(
-    #     state: np.ndarray,
-    # ) -> Tuple[Iterable[np.ndarray], Iterable[float]]:
-    #     """Give a game state tensor, returns the action probabilities
-    #     and estimated state value from current player's perspective."""
-    #     state = np.expand_dims(state, axis=0)
-    #     state = torch.from_numpy(state).to(dtype=torch.float32, device=device, non_blocking=True)
-
-    #     pi_logits, v = network(state)
-
-    #     pi_logits = torch.detach(pi_logits)
-    #     v = torch.detach(v)
-
-    #     pi = torch.softmax(pi_logits, dim=-1).cpu().numpy()
-    #     v = v.cpu().numpy()
-
-    #     B, *_ = state.shape
-
-    #     v = np.squeeze(v, axis=1)
-    #     v = v.tolist()  # To list
-
-
-    #     # pi = pi[0]
-    #     # v = v[0]
-
-
-    #     return pi, v
-    # root = MCTSNode(action_count, eval_position, board, 1);
-
-    # for i in range(0, 13 * 13):
-    #     sim_count = 200;
-    #     start_time = time.time()
-
-    #     while sim_count > 0:
-    #         node, count = root.expand_until_leaf_or_terminal(sim_count, 1)
-    #         sim_count -= count
-    #         node.back_update()
-    #     end_time = time.time()
-
-    #     print(root.children_N[:-1].reshape(size, size))
-    #     print(root.children_Q[:-1].reshape(size, size))
-    #     next_node = root.commit_next_move()
-    #     b = next_node.get_board().render();
-    #     root = next_node
-    #     print(f"===<commited one move> time {end_time - start_time}=====")
-    #     print(b)
-
-    #     res = root.get_result()
-    #     if res is not GameResult.UNDECIDED:
-    #         print(f"winner: {root.get_board().get_winner()}")
-    #         break
+        dump_dir="/Users/sjin2/PPP/AlphaKindaZero/8by8-dump"
+    )
 
 
 

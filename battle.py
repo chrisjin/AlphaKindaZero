@@ -101,7 +101,7 @@ def battle_models(
     model_manager: ModelCheckpointManager,
     model1_index: int = 0,  # Latest model (Black)
     model2_index: int = 1,  # Second to last model (White)
-    board_size: Tuple[int, int] = (11, 11),
+    input_dim: Tuple[int, int, int] = (17, 11, 11),
     sim_count: int = 400,
     temperature: float = 1.0,
     add_noise: bool = False,
@@ -130,8 +130,8 @@ def battle_models(
             device = torch.device("cpu")
     
     # Setup
-    input_dim = (17, board_size[0], board_size[1])
-    action_count = board_size[0] * board_size[1] + 1
+    board_size = (input_dim[1], input_dim[2])
+    action_count = input_dim[1] * input_dim[2] + 1
     
     # Show available models
     print("📁 Available models:")
@@ -154,7 +154,7 @@ def battle_models(
     
     print(f"🎮 Battle started: Model {model1_index} (Black) vs Model {model2_index} (White)")
     print(f"📊 Settings: {sim_count} sims, temp={temperature}, noise={add_noise}")
-    print(f"📋 Board: {board_size[0]}x{board_size[1]}")
+    print(f"📋 Board: {board_size[0]}x{board_size[1]} (input_dim: {input_dim})")
     print("-" * 50)
     
     # Game loop
@@ -206,6 +206,7 @@ def battle_models(
             'sim_count': sim_count,
             'temperature': temperature,
             'add_noise': add_noise,
+            'input_dim': input_dim,
             'board_size': board_size
         }
     }
@@ -221,7 +222,7 @@ def run_tournament(
     model1_index: int = 0,
     model2_index: int = 1,
     num_games: int = 10,
-    board_size: Tuple[int, int] = (11, 11),
+    input_dim: Tuple[int, int, int] = (17, 11, 11),
     sim_count: int = 200,
     temperature: float = 1.0,
     add_noise: bool = False,
@@ -250,8 +251,10 @@ def run_tournament(
         else:
             device = torch.device("cpu")
     
+    board_size = (input_dim[1], input_dim[2])
     print(f"🏆 Tournament: Model {model1_index} vs Model {model2_index}")
     print(f"📊 {num_games} games, {sim_count} sims per move, temp={temperature}")
+    print(f"📋 Board: {board_size[0]}x{board_size[1]} (input_dim: {input_dim})")
     print("=" * 60)
     
     results = []
@@ -277,7 +280,7 @@ def run_tournament(
             model_manager=model_manager,
             model1_index=black_model_index,
             model2_index=white_model_index,
-            board_size=board_size,
+            input_dim=input_dim,
             sim_count=sim_count,
             temperature=temperature,
             add_noise=add_noise,
@@ -340,7 +343,7 @@ def run_tournament_with_early_stop(
     model1_index: int = 0,
     model2_index: int = 1,
     num_games: int = 10,
-    board_size: Tuple[int, int] = (11, 11),
+    input_dim: Tuple[int, int, int] = (17, 11, 11),
     sim_count: int = 200,
     temperature: float = 1.0,
     add_noise: bool = True,
@@ -404,7 +407,7 @@ def run_tournament_with_early_stop(
             model_manager=model_manager,
             model1_index=black_model_index,
             model2_index=white_model_index,
-            board_size=board_size,
+            input_dim=input_dim,
             sim_count=sim_count,
             temperature=temperature,
             add_noise=add_noise,
@@ -471,7 +474,7 @@ def run_comprehensive_tournament(
     model_manager: ModelCheckpointManager,
     model_indices: list = None,
     games_per_match: int = 4,
-    board_size: Tuple[int, int] = (11, 11),
+    input_dim: Tuple[int, int, int] = (17, 11, 11),
     sim_count: int = 50,
     temperature: float = 1.0,
     add_noise: bool = False,
@@ -534,7 +537,7 @@ def run_comprehensive_tournament(
                 model1_index=i,
                 model2_index=j,
                 num_games=games_per_match,
-                board_size=board_size,
+                input_dim=input_dim,
                 sim_count=sim_count,
                 temperature=temperature,
                 add_noise=add_noise,
@@ -595,7 +598,7 @@ def run_tournament_and_dump_loser(
     model1_index: int = 0,
     model2_index: int = 1,
     num_games: int = 20,
-    board_size: Tuple[int, int] = (11, 11),
+    input_dim: Tuple[int, int, int] = (17, 11, 11),
     sim_count: int = 100,
     temperature: float = 1.0,
     add_noise: bool = True,
@@ -639,7 +642,7 @@ def run_tournament_and_dump_loser(
         model1_index=model1_index,
         model2_index=model2_index,
         num_games=num_games,
-        board_size=board_size,
+        input_dim=input_dim,
         sim_count=sim_count,
         temperature=temperature,
         add_noise=add_noise,
@@ -656,7 +659,10 @@ def run_tournament_and_dump_loser(
     print(f"Model {model2_index} wins: {model2_wins}")
     print(f"Draws: {tournament_result['draws']}")
     
-    # Determine loser and move to dump
+    # Determine winner and handle dumping based on model age
+    newer_model_index = min(model1_index, model2_index)  # Lower index = newer model
+    older_model_index = max(model1_index, model2_index)  # Higher index = older model
+    
     if model1_wins > model2_wins:
         winner_index = model1_index
         loser_index = model2_index
@@ -665,30 +671,37 @@ def run_tournament_and_dump_loser(
     elif model2_wins > model1_wins:
         winner_index = model2_index
         loser_index = model1_index
-        print(f"🏆 Winner: Model {winner_index}")
-        print(f"💀 Loser: Model {loser_index}")
     else:
-        # Tie - move both to dump
-        print(f"🤝 Tie! Both models will be moved to dump")
+        # Tie - keep both models
         winner_index = None
         loser_index = None
     
-    # Move loser(s) to dump directory
-    if loser_index is not None:
-        # Create dump directory
-        os.makedirs(dump_dir, exist_ok=True)
-        
-        # Move the losing model to dump directory (preserves original filename)
-        success = model_manager.move_model_by_index(loser_index, dump_dir, move_file=True)
-        
-        if success:
-            print(f"🗑️  Moved losing model {loser_index} to {dump_dir}")
+    # Handle dumping based on model age
+    if winner_index is not None:
+        if winner_index == newer_model_index:
+            # Newer model won - keep both models
+            print(f"✅ Newer model {newer_model_index} won against older model {older_model_index}")
+            print(f"📦 Keeping both models (newer model is better)")
         else:
-            print(f"❌ Failed to move losing model {loser_index}")
+            # Older model won - dump the newer model
+            print(f"💀 Newer model {newer_model_index} lost to older model {older_model_index}")
+            print(f"🗑️  Dumping newer model {newer_model_index} (older model is better)")
+            
+            # Create dump directory
+            os.makedirs(dump_dir, exist_ok=True)
+            
+            # Move the newer (losing) model to dump
+            success = model_manager.move_model_by_index(newer_model_index, dump_dir, move_file=True)
+            
+            if success:
+                print(f"🗑️  Moved newer model {newer_model_index} to {dump_dir}")
+            else:
+                print(f"❌ Failed to move newer model {newer_model_index}")
     
     elif winner_index is None:
-        # Tie case - move both models
-        print("Do nothing! Tie!")
+        # Tie case - keep both models
+        print(f"🤝 Tournament ended in a tie")
+        print(f"📦 Keeping both models (no clear winner)")
 
     # Add dump information to result
     tournament_result['dump_info'] = {
@@ -708,11 +721,12 @@ def main():
         "/Users/sjin2/PPP/AlphaKindaZero/after-fix")
     
     # Run comprehensive tournament for the latest 3 models
+    input_dim = (17, 11, 11)
     tournament_result = run_comprehensive_tournament(
         model_manager=model_manager,
-        model_indices=range(0, 3),  # Latest 3 models
+        model_indices=range(0, 4),  # Latest 3 models
         games_per_match=4,  # 10 games per model pair
-        board_size=(11, 11),
+        input_dim=input_dim,
         sim_count=100,   # 100 sims per move
         temperature=1.0,
         add_noise=True,  # Add noise for evaluation
