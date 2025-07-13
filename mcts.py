@@ -479,7 +479,7 @@ def main():
     #     momentum=0.9,
     #     weight_decay=1e-4,
     # )
-    optimizer = torch.optim.Adam(network.parameters(), lr=1e-4, weight_decay=1e-4)
+    optimizer = torch.optim.Adam(network.parameters(), lr=1e-3, weight_decay=1e-4)
 
     lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[100000, 200000], gamma=0.1)
     
