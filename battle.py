@@ -688,17 +688,8 @@ def run_tournament_and_dump_loser(
     
     elif winner_index is None:
         # Tie case - move both models
-        os.makedirs(dump_dir, exist_ok=True)
-        
-        # Move both models to dump directory (preserves original filenames)
-        for model_index in [model1_index, model2_index]:
-            success = model_manager.move_model_by_index(model_index, dump_dir, move_file=True)
-            
-            if success:
-                print(f"🗑️  Moved tied model {model_index} to {dump_dir}")
-            else:
-                print(f"❌ Failed to move tied model {model_index}")
-    
+        print("Do nothing! Tie!")
+
     # Add dump information to result
     tournament_result['dump_info'] = {
         'winner_index': winner_index,

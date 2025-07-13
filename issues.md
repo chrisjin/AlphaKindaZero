@@ -1,3 +1,5 @@
+
+1. Run tournaments
   [0] 20250712_202333.pt (2025-07-12 20:23:34)
   [1] 20250712_201409.pt (2025-07-12 20:14:09)
   [2] 20250712_200525.pt (2025-07-12 20:05:25)
@@ -15,7 +17,7 @@
   [14] 20250712_182610.pt (2025-07-12 18:26:10)
   [15] 20250712_181824.pt (2025-07-12 18:18:24)
   [16] 20250712_181048.pt (2025-07-12 18:10:48)
-  
+
 
 🏆 FINAL TOURNAMENT RESULTS
 📊 Models 0 to 16
@@ -39,3 +41,5 @@ Rank Model  Wins   Losses   Draws  Games  Win Rate
 16   5      29     35       0      64     45.3%
 17   9      25     39       0      64     39.1%
 
+
+2. with sim = 200, new models always lose to model 20250712_190041 so increasing it to 400. After training, new model beats 20250712_190041, 5 to 0 immediately
