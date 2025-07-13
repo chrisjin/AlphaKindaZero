@@ -9,6 +9,7 @@ import numpy as np
 import torch
 from torch import nn
 import torch.nn.functional as F
+import sys
 
 from alphago_nn import AlphaZeroNet
 from board import Board, GameResult
@@ -16,7 +17,25 @@ from five_in_a_row_board import FiveInARowBoard
 from model_manager import ModelCheckpointManager
 from training_sample_queue import ReplayBuffer, SelfPlayGameBuffer
 
+def select_action(N: np.ndarray, policy: np.ndarray) -> Optional[int]:
+    max_value = np.max(N)
+    max_indices = np.flatnonzero(N == max_value)
 
+    if len(max_indices) == 0:
+        return None  # No legal move
+    elif len(max_indices) == 1:
+        return max_indices[0]
+    else:
+        
+        best_index = max_indices[0]
+        best_policy = policy[best_index]
+
+        for idx in max_indices[1:]:
+            if policy[idx] > best_policy:
+                best_index = idx
+                best_policy = policy[idx]
+        print(f"Tie breaking: {best_index}")
+        return best_index
 
 class MCTSNode:
     def __init__(self, children_size: int, policy_func: Callable[[np.ndarray], Tuple[Iterable[np.ndarray], Iterable[float]]], 
@@ -58,9 +77,22 @@ class MCTSNode:
         alphas = np.ones_like(self.policy) * alpha
         noise = np.random.dirichlet(alphas)
         self.policy = 0.75 * self.policy + 0.25 * noise
-        
+    
+    def get_v(self):
+        return self.v
+
     def pick_next_move(self) -> int:
-        return np.argmax(self.children_N)
+        return select_action(self.children_N, self.policy)
+        # num_mi = self.children_N[np.nonzero(self.children_N)]
+        # mi = np.min(self.children_N[np.nonzero(self.children_N)])
+        # ma = np.max(self.children_N)
+        # if mi == ma and len(num_mi) > 1:
+        #     action = np.argmax(self.policy)
+        #     print(f"Tie breaking using policy!!!! {action}")
+        #     node, count = self.expand_until_leaf_or_terminal(1600, 1, action)
+        #     node.back_update()
+        #     return action
+        # return np.argmax(self.children_N)
     
     def commit_next_move(self) -> MCTSNode:
         action = self.pick_next_move()
@@ -104,7 +136,7 @@ class MCTSNode:
         pi = N_power / total
         return pi
 
-    def expand(self, c: float) -> Tuple[MCTSNode, bool]:
+    def expand(self, c: float, action_fix = None) -> Tuple[MCTSNode, bool]:
         policy = self.policy
 
         # formula = self.children_Q + c * policy * np.sqrt(self.N) / (1 + self.children_N)
@@ -114,8 +146,10 @@ class MCTSNode:
         # formula[illegal_actions] = -1000
         # print(f"{formula}\n")
         # formula = self.calc_formula(1)
-
-        formula, action = self.calc_formula(1)
+        if action_fix is not None:
+            action = action_fix
+        else:
+            formula, action = self.calc_formula(1)
         row, col = self.board.unflatten_index(action)
 
 
@@ -131,13 +165,13 @@ class MCTSNode:
 
         return (new_node, is_new_node)
     
-    def expand_until_leaf_or_terminal(self, limit: int, c: float) -> Tuple[MCTSNode, int]:
+    def expand_until_leaf_or_terminal(self, limit: int, c: float, action_fix = None) -> Tuple[MCTSNode, int]:
         tmp = self
         steps = 1
         while limit > 0:
             if tmp.get_result() is not GameResult.UNDECIDED:
                 return (tmp, steps)
-            next, is_new_node = tmp.expand(c)
+            next, is_new_node = tmp.expand(c, action_fix)
             if is_new_node:
                 return (next, steps)
             tmp = next
@@ -214,6 +248,7 @@ def play_one_game(device: torch.device, inference_model: nn.Module) -> SelfPlayG
 
     for i in range(0, 13 * 13):
         sim_count = 200;
+        print(f"Start sim {sim_count}")
         start_time = time.time()
         root.add_noise()
         while sim_count > 0:
@@ -224,6 +259,9 @@ def play_one_game(device: torch.device, inference_model: nn.Module) -> SelfPlayG
 
         print(root.children_N[:-1].reshape(size, size))
         print(root.children_Q[:-1].reshape(size, size))
+        print(root.formula[:-1].reshape(size, size))
+        print(root.policy[:-1].reshape(size, size))
+        print(f"To play {root.get_board().get_current_player()}, V: {root.get_v()}")
         game_buffer.add_sample(root.get_board().get_stack(), root.get_training_pi(1.0), root.get_board().get_current_player())
         next_node = root.commit_next_move()
         b = next_node.get_board().render();
@@ -246,7 +284,7 @@ def compute_losses(network, state, target_pi, target_v) -> Tuple[torch.Tensor, t
     policy_loss = F.cross_entropy(pred_pi_logits, target_pi, reduction='mean')
 
     # State value MSE loss
-    value_loss = F.mse_loss(pred_v.squeeze(), target_v, reduction='mean')
+    value_loss = F.mse_loss(pred_v.squeeze(), target_v.squeeze(), reduction='mean')
 
     return policy_loss, value_loss
 
@@ -262,7 +300,7 @@ def train_one_batch(replay_buffer: ReplayBuffer, model: nn.Module, lr_scheduler:
     optimizer.zero_grad()
 
     pi_loss, v_loss = compute_losses(model, states, policies, values)
-    loss = pi_loss + v_loss
+    loss = pi_loss + 0.5 * v_loss
     loss.backward()
     optimizer.step()
     lr_scheduler.step()
@@ -284,13 +322,17 @@ def generate_replays(model_manager: ModelCheckpointManager, device: torch.device
         print("loading weights")
         infer_model.load_state_dict(weights)
 
-    for i in range(0, 10):
+    for i in range(0, 20):
         game = play_one_game(device, infer_model)
+        print("====== One game done ======")
         replay_buffer.add_game(game)
     return replay_buffer
 
 
 def main():
+    np.set_printoptions(formatter={'float': lambda x: "{0:0.3f}".format(x)})
+    np.set_printoptions(linewidth=sys.maxsize) 
+
     input_dim = (17, size, size)
 
     # device = torch.device("cpu")
@@ -301,7 +343,7 @@ def main():
         print("User cpu")
         device = torch.device("cpu")
     
-    model_manager = ModelCheckpointManager(type(AlphaZeroNet), "/Users/shikaijin/Desktop/projects/Models/first")
+    model_manager = ModelCheckpointManager(type(AlphaZeroNet), "/Users/sjin2/PPP/AlphaKindaZero/after-fix")
 
     replay_buffer = generate_replays(model_manager, device)
     # replay_buffer = ReplayBuffer(20000, 32)
@@ -315,17 +357,21 @@ def main():
     #     replay_buffer.add_game(game)
     
     network = AlphaZeroNet(input_dim, action_count).to(device)
+    weights = model_manager.load_latest(device)
+    if weights is not None:
+        print("loading weights")
+        network.load_state_dict(weights)
     # optimizer = torch.optim.SGD(
     #     network.parameters(),
     #     lr=1e-4,
     #     momentum=0.9,
     #     weight_decay=1e-4,
     # )
-    optimizer = torch.optim.Adam(network.parameters(), lr=1e-3, weight_decay=1e-4)
+    optimizer = torch.optim.Adam(network.parameters(), lr=1e-4, weight_decay=1e-4)
 
     lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[100000, 200000], gamma=0.1)
     print("Start training!!!!!!")
-    for i in range(0, 40 * math.ceil(len(replay_buffer) / 32 * 2)):
+    for i in range(0, 40 * math.ceil(len(replay_buffer) / 32)):
         train_one_batch(replay_buffer, network, lr_scheduler, optimizer, device)   
     print("Saving model!!!!!!")
     model_manager.save(network) 

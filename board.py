@@ -25,7 +25,7 @@ class Board:
         self.white_board = np.zeros(size, dtype=np.float32)
         self.to_play = 1  # Player 1 goes first
         self.queue.push_board(self.current_board)
-        self.queue.set_player(self.to_play)
+        self.queue.set_player(self.to_play == 1)
 
     def current_binary_board(self) -> np.ndarray:
         if self.to_play == 1:
@@ -40,15 +40,18 @@ class Board:
         self.current_board[row, col] = self.to_play
         binary_board = self.current_binary_board()
         binary_board[row, col] = 1
-        self.queue.set_player(self.to_play == 1)
-        self.to_play = 3 - self.to_play  # Switch between 1 and 2
+        # Push the plane for the player who just moved **before** we flip `to_play`
         self.queue.push_board(binary_board.copy())
+        # Now switch to the next player and update the indicator mask
+        self.to_play = 3 - self.to_play  # 1 ↔ 2
+        self.queue.set_player(self.to_play == 1)
         return True
     
     def pass_move(self):
-        self.queue.set_player(self.to_play == 1)
-        self.to_play = 3 - self.to_play  # Switch between 1 and 2
+        # Store current plane first, then flip player and update mask
         self.queue.push_board(self.current_binary_board().copy())
+        self.to_play = 3 - self.to_play  # 1 ↔ 2
+        self.queue.set_player(self.to_play == 1)
         return True
 
     def get_stack(self) -> np.ndarray:

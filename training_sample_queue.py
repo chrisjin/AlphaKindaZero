@@ -27,7 +27,7 @@ class SelfPlayGameBuffer:
         """Call this at game end to assign result to all samples"""
         self.final_result = winner
         for sample in self.samples:
-            if winner == 0:
+            if winner == 0 or winner is None:
                 sample.set_result(0)
             elif sample.to_play == winner:
                 print(f"set +1 for sample {winner}, {sample.to_play}")

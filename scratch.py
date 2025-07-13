@@ -19,7 +19,7 @@ action_count = size * size + 1
 
 input1 = torch.rand((1, 17, 11, 11)).to(device)
 input2 = torch.zeros((1, 17, 11, 11)).to(device)
-model_manager = ModelCheckpointManager(type(AlphaZeroNet), "/Users/shikaijin/Desktop/projects/Models/first")
+model_manager = ModelCheckpointManager(type(AlphaZeroNet), "/Users/shikaijin/Desktop/projects/Models/after-fix")
 
 infer_model = AlphaZeroNet(input_dim, action_count).to(device)
 weights = model_manager.load_latest(device)
