@@ -53,6 +53,7 @@ class ReplayBuffer:
         self.max_samples = max_samples
         self.batch_size = batch_size
         self.buffer: List[Tuple[np.ndarray, np.ndarray, float]] = []
+        self.full = False
 
     def add_game(self, game_buffer: SelfPlayGameBuffer) -> int:
         """Add all samples from one finished game"""
@@ -62,8 +63,12 @@ class ReplayBuffer:
         # FIFO eviction
         excess = len(self.buffer) - self.max_samples
         if excess > 0:
+            self.full = True
             self.buffer = self.buffer[excess:]
         return len(samples)
+    
+    def is_full(self) -> bool:
+        return self.full
 
     def sample_batch(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Randomly sample a training batch of (state, pi, z)"""
@@ -78,3 +83,4 @@ class ReplayBuffer:
 
     def __len__(self):
         return len(self.buffer)
+

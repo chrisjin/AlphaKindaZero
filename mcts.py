@@ -261,7 +261,7 @@ def play_one_game(device: torch.device, inference_model: nn.Module) -> SelfPlayG
     root = MCTSNode(action_count, eval_position, board, 1);
 
     for i in range(0, 13 * 13):
-        sim_count = 200;
+        sim_count = 400;
         print(f"Start sim {sim_count}")
         start_time = time.time()
         root.add_noise()
@@ -327,21 +327,123 @@ def train_one_batch(replay_buffer: ReplayBuffer, model: nn.Module, lr_scheduler:
     }
     print(f"{stats}")
 
+def train_one_epoch(replay_buffer: ReplayBuffer, model: nn.Module, lr_scheduler: torch.optim.lr_scheduler.MultiStepLR, 
+          optimizer: torch.optim.Optimizer,
+          device: torch.device):
+    for i in range(0, len(replay_buffer) // replay_buffer.batch_size):
+        train_one_batch(replay_buffer, model, lr_scheduler, optimizer, device) 
 
-def generate_replays(model_manager: ModelCheckpointManager, device: torch.device) -> ReplayBuffer:
-    replay_buffer = ReplayBuffer(20000, 32)
+
+def generate_replays(
+    replay_buffer: ReplayBuffer,
+    infer_model: AlphaZeroNet, 
+    max_replace_sample_ratio: float,
+    device: torch.device
+) -> ReplayBuffer:
+    replace_sample_count = 0
+    total_games = 0
+    print(f"Starting replay generation: buffer size={len(replay_buffer)}, max_samples={replay_buffer.max_samples}, max_replace_ratio={max_replace_sample_ratio}")
+    while (not replay_buffer.is_full()) or (replace_sample_count < max_replace_sample_ratio * replay_buffer.max_samples):
+        game = play_one_game(device, infer_model)
+        added = replay_buffer.add_game(game)
+        replace_sample_count += added
+        total_games += 1
+        print(f"Game {total_games} finished. Added {added} samples. Replaced Sample Count: {replace_sample_count}, Buffer size: {len(replay_buffer)} / {replay_buffer.max_samples}")
+    print(f"Replay generation complete. Total games played: {total_games}, total samples replaced/added: {replace_sample_count}")
+    return replay_buffer
+
+def load_latest_model(model_manager: ModelCheckpointManager, device: torch.device) -> AlphaZeroNet:
     infer_model = AlphaZeroNet(input_dim, action_count).to(device)
     weights = model_manager.load_latest(device)
     if weights is not None:
         print("loading weights")
         infer_model.load_state_dict(weights)
+    return infer_model
 
-    for i in range(0, 20):
-        game = play_one_game(device, infer_model)
-        print("====== One game done ======")
-        replay_buffer.add_game(game)
+def train_on_latest_model_epoch(
+    replay_buffer: ReplayBuffer, 
+    model_manager: ModelCheckpointManager, 
+    model: AlphaZeroNet,
+    device: torch.device, 
+    epoch: int,
+    lr_scheduler: torch.optim.lr_scheduler.MultiStepLR,
+    optimizer: torch.optim.Optimizer
+) -> ReplayBuffer:
+    for i in range(0, epoch):
+        train_one_epoch(replay_buffer, model, lr_scheduler, optimizer, device)
     return replay_buffer
 
+def generate_replays_and_train(
+    replay_buffer: ReplayBuffer, 
+    model_manager: ModelCheckpointManager, 
+    model: AlphaZeroNet,
+    device: torch.device, 
+    epoch: int,
+    lr_scheduler: torch.optim.lr_scheduler.MultiStepLR,
+    optimizer: torch.optim.Optimizer,
+    tournament_games: int = 20,
+    tournament_sims: int = 100,
+    early_stop_lead: int = 5,
+    dump_dir: str = "dump"
+) -> ReplayBuffer:
+    iteration = 0
+    
+    while True:
+        iteration += 1
+        print(f"\n🔄 Training Iteration {iteration}")
+        print("=" * 50)
+
+        # # Load the latest model from the model manager
+        infer_model = load_latest_model(model_manager, device)
+        
+        # Generate replays using the current model
+        replay_buffer = generate_replays(
+            replay_buffer=replay_buffer,
+            infer_model=infer_model,
+            max_replace_sample_ratio=0.75,
+            device=device
+        )
+        training_model = load_latest_model(model_manager, device)
+
+        train_on_latest_model_epoch(replay_buffer, model_manager, training_model, device, epoch, lr_scheduler, optimizer)
+        model_manager.save(training_model)
+        
+        # After training, run tournament between current model (index 0) and previous model (index 1)
+        print(f"\n🏆 Running tournament to evaluate new model...")
+        
+        # Import battle functions
+        from battle import run_tournament_and_dump_loser
+        
+        try:
+            tournament_result = run_tournament_and_dump_loser(
+                model_manager=model_manager,
+                model1_index=0,  # Current model (latest)
+                model2_index=1,  # Previous model
+                num_games=tournament_games,
+                board_size=(11, 11),
+                sim_count=tournament_sims,
+                temperature=1.0,
+                add_noise=False,
+                device=device,
+                dump_dir=dump_dir,
+                early_stop_lead=early_stop_lead
+            )
+            
+            # Check if the current model (index 0) lost
+            if tournament_result['dump_info']['winner_index'] == 1:  # Previous model won
+                print(f"💀 Current model (index 0) lost to previous model (index 1)")
+                print(f"🗑️  Current model was moved to {dump_dir}")
+                print(f"🔄 Continuing training with previous model...")
+            elif tournament_result['dump_info']['winner_index'] == 0:  # Current model won
+                print(f"✅ Current model (index 0) won against previous model (index 1)")
+                print(f"🗑️  Previous model was moved to {dump_dir}")
+            else:
+                print(f"🤝 Tournament ended in a tie - both models moved to {dump_dir}")
+                
+        except Exception as e:
+            print(f"⚠️  Tournament failed: {e}")
+            print(f"🔄 Continuing training without tournament evaluation...")
+        
 
 def main():
     np.set_printoptions(formatter={'float': lambda x: "{0:0.3f}".format(x)})
@@ -359,22 +461,13 @@ def main():
     
     model_manager = ModelCheckpointManager(type(AlphaZeroNet), "/Users/sjin2/PPP/AlphaKindaZero/after-fix")
 
-    replay_buffer = generate_replays(model_manager, device)
-    # replay_buffer = ReplayBuffer(20000, 32)
-    # infer_model = AlphaZeroNet(input_dim, action_count).to(device)
+    replay_buffer = ReplayBuffer(600, 32)
+    
+    network = load_latest_model(model_manager, device)
     # weights = model_manager.load_latest(device)
     # if weights is not None:
-    #     infer_model.load_state_dict(weights)
-
-    # for i in range(0, 10):
-    #     game = play_one_game(device, infer_model)
-    #     replay_buffer.add_game(game)
-    
-    network = AlphaZeroNet(input_dim, action_count).to(device)
-    weights = model_manager.load_latest(device)
-    if weights is not None:
-        print("loading weights")
-        network.load_state_dict(weights)
+    #     print("loading weights")
+    #     network.load_state_dict(weights)
     # optimizer = torch.optim.SGD(
     #     network.parameters(),
     #     lr=1e-4,
@@ -384,11 +477,22 @@ def main():
     optimizer = torch.optim.Adam(network.parameters(), lr=1e-4, weight_decay=1e-4)
 
     lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[100000, 200000], gamma=0.1)
-    print("Start training!!!!!!")
-    for i in range(0, 40 * math.ceil(len(replay_buffer) / 32)):
-        train_one_batch(replay_buffer, network, lr_scheduler, optimizer, device)   
-    print("Saving model!!!!!!")
-    model_manager.save(network) 
+    
+    # Start the training loop with tournament evaluation
+    print("Start training with tournament evaluation!!!!!!")
+    generate_replays_and_train(
+        replay_buffer=replay_buffer,
+        model_manager=model_manager,
+        model=network,
+        device=device,
+        epoch=30,  # Train for 1 epoch per iteration
+        lr_scheduler=lr_scheduler,
+        optimizer=optimizer,
+        tournament_games=20,
+        tournament_sims=100,
+        early_stop_lead=5,
+        dump_dir="/Users/sjin2/PPP/AlphaKindaZero/after-fix-dump"
+    ) 
 
     # size = 11;
     # input_dim = (17, size, size)
