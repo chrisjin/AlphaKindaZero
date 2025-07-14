@@ -25,7 +25,7 @@ class Board:
         self.white_board = np.zeros(size, dtype=np.float32)
         self.to_play = 1  # Player 1 goes first
         self.queue.push_board(self.current_board)
-        self.queue.set_player(self.to_play)
+        self.queue.set_player(self.to_play == 1)
 
     def current_binary_board(self) -> np.ndarray:
         if self.to_play == 1:
@@ -40,15 +40,18 @@ class Board:
         self.current_board[row, col] = self.to_play
         binary_board = self.current_binary_board()
         binary_board[row, col] = 1
-        self.queue.set_player(self.to_play == 1)
-        self.to_play = 3 - self.to_play  # Switch between 1 and 2
+        # Push the plane for the player who just moved **before** we flip `to_play`
         self.queue.push_board(binary_board.copy())
+        # Now switch to the next player and update the indicator mask
+        self.to_play = 3 - self.to_play  # 1 ↔ 2
+        self.queue.set_player(self.to_play == 1)
         return True
     
     def pass_move(self):
-        self.queue.set_player(self.to_play == 1)
-        self.to_play = 3 - self.to_play  # Switch between 1 and 2
+        # Store current plane first, then flip player and update mask
         self.queue.push_board(self.current_binary_board().copy())
+        self.to_play = 3 - self.to_play  # 1 ↔ 2
+        self.queue.set_player(self.to_play == 1)
         return True
 
     def get_stack(self) -> np.ndarray:
@@ -97,6 +100,52 @@ class Board:
         output = []
         for row in matrix:
             output.append(" ".join(["*" if val == 1 else ("O" if val == 2 else "-") for val in row]))
+        return "\n".join(output)
+    
+    def render_stack(self) -> str:
+        """
+        Renders the whole stack with the following formatting:
+        - Black planes: "*"
+        - White planes: "o" 
+        - Player planes: "B" for player 1, "W" for player 2
+        """
+        stack = self.get_stack()
+        height, width = self.size
+        num_planes = stack.shape[0]
+        
+        output = []
+        output.append(f"Stack shape: {stack.shape}")
+        output.append("=" * (width * 2 + 10))
+        
+        for plane_idx in range(num_planes):
+            plane = stack[plane_idx]
+            output.append(f"Plane {plane_idx}:")
+            to_play_odd_plane = (num_planes - 2) % 2
+            # Determine what this plane represents
+            if plane_idx < num_planes - 1:  # History planes
+                if (plane_idx % 2 == to_play_odd_plane) ^ (self.to_play == 1):  # Black planes
+                    plane_type = "Black"
+                    symbol = "*"
+                else:  # White planes
+                    plane_type = "White" 
+                    symbol = "o"
+            else:  # Player indicator plane
+                plane_type = "Player"
+                symbol = "B" if self.to_play == 1 else "W"
+            
+            output.append(f"  Type: {plane_type}")
+            
+            # Render the plane
+            for row in range(height):
+                row_str = "  "
+                for col in range(width):
+                    if plane[row, col] == 1:
+                        row_str += symbol + " "
+                    else:
+                        row_str += ". "
+                output.append(row_str)
+            output.append("")
+        
         return "\n".join(output)
     
     def flatten_pos(self, pos: Tuple[int, int]) -> int:
