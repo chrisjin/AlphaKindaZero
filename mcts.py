@@ -17,6 +17,37 @@ from five_in_a_row_board import FiveInARowBoard
 from model_manager import ModelCheckpointManager
 from training_sample_queue import ReplayBuffer, SelfPlayGameBuffer
 
+        
+import os
+import pickle
+
+def save_replay_buffer(replay_buffer, filename):
+    """
+    Save the replay buffer to a pickle file.
+    """
+    with open(filename, 'wb') as f:
+        pickle.dump(replay_buffer, f)
+    print(f"Replay buffer saved to {filename}")
+
+def load_or_create_replay_buffer(filename, max_samples, batch_size):
+    """
+    Load the replay buffer from a pickle file if it exists, otherwise create a new one.
+    """
+    if os.path.exists(filename):
+        try:
+            with open(filename, 'rb') as f:
+                replay_buffer = pickle.load(f)
+            print(f"Replay buffer loaded from {filename}")
+            return replay_buffer
+        except Exception as e:
+            print(f"Failed to load replay buffer from {filename}: {e}")
+            print("Creating a new replay buffer.")
+    else:
+        print(f"No replay buffer found at {filename}. Creating a new one.")
+    from training_sample_queue import ReplayBuffer
+    return ReplayBuffer(max_samples, batch_size)
+
+
 def select_action(N: np.ndarray, policy: np.ndarray) -> Optional[int]:
     max_value = np.max(N)
     max_indices = np.flatnonzero(N == max_value)
@@ -262,11 +293,11 @@ def play_one_game(device: torch.device, inference_model: nn.Module) -> SelfPlayG
     root = MCTSNode(action_count, eval_position, board, 1);
     step_count = 0
     for i in range(0, 13 * 13):
-        sim_count = 100;
+        sim_count = 200;
         print(f"Start sim {sim_count}")
         start_time = time.time()
         if step_count < 2:
-            root.add_noise(0.05, 0.25)
+            root.add_noise(0.05, 0.75)
         else:
             root.add_noise(0.03)
         print(f"Step {step_count}")
@@ -322,7 +353,7 @@ def train_one_batch(replay_buffer: ReplayBuffer, model: nn.Module, lr_scheduler:
     optimizer.zero_grad()
 
     pi_loss, v_loss = compute_losses(model, states, policies, values)
-    loss = pi_loss + 0.25 * v_loss
+    loss = pi_loss + 0.5 * v_loss
     loss.backward()
     optimizer.step()
     lr_scheduler.step()
@@ -356,7 +387,7 @@ def generate_replays(
         added = replay_buffer.add_game(game)
         replace_sample_count += added
         total_games += 1
-        print(f"Game {total_games} finished. Added {added} samples. Replaced Sample Count: {replace_sample_count}, Buffer size: {len(replay_buffer)} / {replay_buffer.max_samples}")
+        print(f"Game {total_games} finished. Added {added} samples. Replaced Sample Count: {replace_sample_count}, Buffer size: {len(replay_buffer)} / {replay_buffer.max_samples}, Total Replaced samples: {replay_buffer.replaced_samples}")
     print(f"Replay generation complete. Total games played: {total_games}, total samples replaced/added: {replace_sample_count}")
     return replay_buffer
 
@@ -379,6 +410,7 @@ def train_on_latest_model_epoch(
 ) -> ReplayBuffer:
     for i in range(0, epoch):
         train_one_epoch(replay_buffer, model, lr_scheduler, optimizer, device)
+        print(f"Epoch {i} finished")
     return replay_buffer
 
 def generate_replays_and_train(
@@ -389,10 +421,11 @@ def generate_replays_and_train(
     tournament_games: int = 20,
     tournament_sims: int = 100,
     early_stop_lead: int = 5,
-    dump_dir: str = "dump"
+    dump_dir: str = "dump",
+    replay_buffer_path: str = "replay_buffer.pkl"
 ) -> ReplayBuffer:
     iteration = 0
-    
+    buffer_refresh_count = 500.0
     while True:
         iteration += 1
         print(f"\n🔄 Training Iteration {iteration}")
@@ -405,14 +438,24 @@ def generate_replays_and_train(
         replay_buffer = generate_replays(
             replay_buffer=replay_buffer,
             infer_model=infer_model,
-            max_replace_sample_ratio=0.25,
+            max_replace_sample_ratio=(buffer_refresh_count / replay_buffer.max_samples),
             device=device
         )
+        save_replay_buffer(replay_buffer, replay_buffer_path)
         training_model = load_latest_model(model_manager, device)
         optimizer = torch.optim.Adam(training_model.parameters(), lr=1e-4, weight_decay=1e-4)
 
         lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[100000, 200000], gamma=0.1)
-        train_on_latest_model_epoch(replay_buffer, model_manager, training_model, device, epoch, lr_scheduler, optimizer)
+        full_buffer_refreshed_iterations = int(replay_buffer.max_samples / buffer_refresh_count)
+        if replay_buffer.replaced_samples > replay_buffer.max_samples:
+            print(f"Full buffer refreshed at iteration {iteration}, do a full training")
+            train_on_latest_model_epoch(replay_buffer, model_manager, training_model, device, 2, lr_scheduler, optimizer)
+            replay_buffer.replaced_samples = 0
+        else:
+            print(f"Full buffer not refreshed at iteration {iteration}, do a partial training {epoch} times")
+            batches = int(buffer_refresh_count * 3 / replay_buffer.batch_size) * epoch
+            for i in range(0, batches):
+                train_one_batch(replay_buffer, training_model, lr_scheduler, optimizer, device)
         model_manager.save(training_model)
         
         # After training, run tournament between current model (index 0) and previous model (index 1)
@@ -454,7 +497,6 @@ def generate_replays_and_train(
                 print(f"🔄 Continuing training without tournament evaluation...")
         else:
             print("⚠️  Not enough models to run tournament (need at least 2). Skipping tournament evaluation.")
-        
 
 def main():
     np.set_printoptions(formatter={'float': lambda x: "{0:0.3f}".format(x)})
@@ -470,19 +512,20 @@ def main():
         device = torch.device("cpu")
     
     model_manager = ModelCheckpointManager(type(AlphaZeroNet), "/Users/sjin2/PPP/AlphaKindaZero/8by8-le")
-
-    replay_buffer = ReplayBuffer(2000, 32)
+    replay_buffer_path = "/Users/sjin2/PPP/AlphaKindaZero/8by8-le-replay-buffer.pkl"
+    replay_buffer = load_or_create_replay_buffer(replay_buffer_path, 20000, 32)
 
     print("Start training with tournament evaluation!!!!!!")
     generate_replays_and_train(
         replay_buffer=replay_buffer,
         model_manager=model_manager,
         device=device,
-        epoch=15,  # Train for 1 epoch per iteration
+        epoch=50,  # Train for 1 epoch per iteration
         tournament_games=20,
         tournament_sims=100,
         early_stop_lead=5,
-        dump_dir="/Users/sjin2/PPP/AlphaKindaZero/8by8-le-dump"
+        dump_dir="/Users/sjin2/PPP/AlphaKindaZero/8by8-le-dump",
+        replay_buffer_path=replay_buffer_path
     )
 
 

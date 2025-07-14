@@ -54,6 +54,7 @@ class ReplayBuffer:
         self.batch_size = batch_size
         self.buffer: List[Tuple[np.ndarray, np.ndarray, float]] = []
         self.full = False
+        self.replaced_samples = 0
 
     def add_game(self, game_buffer: SelfPlayGameBuffer) -> int:
         """Add all samples from one finished game"""
@@ -65,6 +66,9 @@ class ReplayBuffer:
         if excess > 0:
             self.full = True
             self.buffer = self.buffer[excess:]
+            self.replaced_samples += excess
+        else:
+            self.replaced_samples = len(self.buffer)
         return len(samples)
     
     def is_full(self) -> bool:
@@ -83,4 +87,5 @@ class ReplayBuffer:
 
     def __len__(self):
         return len(self.buffer)
+        
 
