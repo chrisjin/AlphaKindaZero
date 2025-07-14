@@ -146,7 +146,7 @@ def battle_models(
     eval_func2 = create_eval_function(model2, device)
     
     # Initialize game
-    board = FiveInARowBoard(board_size, 16)
+    board = FiveInARowBoard(board_size, input_dim[0] - 1)
     root = MCTSNode(action_count, eval_func1, board, 1)
     
     move_count = 0

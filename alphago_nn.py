@@ -90,9 +90,9 @@ class AlphaZeroNet(nn.Module):
         self,
         input_shape: Tuple,
         num_actions: int,
-        num_res_block: int = 19,
-        num_filters: int = 256,
-        num_fc_units: int = 256,
+        num_res_block: int = 8,
+        num_filters: int = 128,
+        num_fc_units: int = 128,
         gomoku: bool = False,
     ) -> None:
         super().__init__()

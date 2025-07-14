@@ -226,13 +226,13 @@ class MCTSNode:
         return self.board
 
 size = 8;
-input_dim = (17, size, size)
+input_dim = (5, size, size)
 action_count = size * size + 1
 
 def play_one_game(device: torch.device, inference_model: nn.Module) -> SelfPlayGameBuffer:
     game_buffer = SelfPlayGameBuffer()
 
-    board = FiveInARowBoard((size, size), 16)
+    board = FiveInARowBoard((size, size), input_dim[0] - 1)
     b = board.render();
     network = inference_model
     @torch.no_grad()
@@ -469,7 +469,7 @@ def main():
         print("User cpu")
         device = torch.device("cpu")
     
-    model_manager = ModelCheckpointManager(type(AlphaZeroNet), "/Users/sjin2/PPP/AlphaKindaZero/8by8")
+    model_manager = ModelCheckpointManager(type(AlphaZeroNet), "/Users/sjin2/PPP/AlphaKindaZero/8by8-le")
 
     replay_buffer = ReplayBuffer(2000, 32)
 
@@ -482,7 +482,7 @@ def main():
         tournament_games=20,
         tournament_sims=100,
         early_stop_lead=5,
-        dump_dir="/Users/sjin2/PPP/AlphaKindaZero/8by8-dump"
+        dump_dir="/Users/sjin2/PPP/AlphaKindaZero/8by8-le-dump"
     )
 
 
