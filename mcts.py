@@ -364,7 +364,7 @@ def train_one_batch(replay_buffer: ReplayBuffer, model: nn.Module, lr_scheduler:
     optimizer.zero_grad()
 
     pi_loss, v_loss = compute_losses(model, states, policies, values)
-    loss = pi_loss + 0.5 * v_loss
+    loss = pi_loss + v_loss
     loss.backward()
     optimizer.step()
     lr_scheduler.step()
@@ -436,7 +436,7 @@ def generate_replays_and_train(
     replay_buffer_path: str = "replay_buffer.pkl"
 ) -> ReplayBuffer:
     iteration = 0
-    buffer_refresh_count = 2000.0
+    buffer_refresh_count = 1000.0
     while True:
         iteration += 1
         print(f"\n🔄 Training Iteration {iteration}")
@@ -464,7 +464,7 @@ def generate_replays_and_train(
             replay_buffer.replaced_samples = 0
         else:
             print(f"Full buffer not refreshed at iteration {iteration}, do a partial training {epoch} times")
-            batches = int(buffer_refresh_count * 2 / replay_buffer.batch_size) * epoch
+            batches = int(buffer_refresh_count * 3 / replay_buffer.batch_size) * epoch
             for i in range(0, batches):
                 train_one_batch(replay_buffer, training_model, lr_scheduler, optimizer, device)
         model_manager.save(training_model)

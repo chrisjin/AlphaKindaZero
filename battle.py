@@ -722,15 +722,15 @@ def main():
     # model_manager = ModelCheckpointManager(type(AlphaZeroNet), 
     #     "/Users/sjin2/PPP/AlphaKindaZero/8by8-le")
     model_manager = ModelCheckpointManager(type(AlphaZeroNet), 
-        "/Users/sjin2/PPP/AlphaKindaZero/8by8-le-4")
+        "/Users/sjin2/PPP/AlphaKindaZero/8by8-le-aug")
     # Run comprehensive tournament for the latest 3 models
     # input_dim = (17, 11, 11)
     input_dim = (5, 8, 8)
 
     tournament_result = run_comprehensive_tournament(
         model_manager=model_manager,
-        model_indices=[0, 100],  # Latest 3 models
-        games_per_match=20,  # 10 games per model pair
+        model_indices=range(10),  # Latest 3 models
+        games_per_match=4,  # 10 games per model pair
         input_dim=input_dim,
         sim_count=100,   # 100 sims per move
         temperature=1.0,

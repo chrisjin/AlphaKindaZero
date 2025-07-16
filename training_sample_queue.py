@@ -141,7 +141,14 @@ class ReplayBuffer:
 
     def sample_batch(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Randomly sample a training batch of (state, pi, z)"""
-        batch = random.sample(self.buffer, k=min(self.batch_size, len(self.buffer)))
+        # Weighted sampling: later items have higher probability
+        buffer_len = len(self.buffer)
+        k = min(self.batch_size, buffer_len)
+        # Assign weights increasing with index (later = higher weight)
+        weights = np.arange(1, buffer_len + 1, dtype=np.float64)
+        weights = weights / weights.sum()
+        indices = np.random.choice(buffer_len, size=k, replace=False, p=weights)
+        batch = [self.buffer[i] for i in indices]
         states, policies, values = zip(*batch)
 
         states_np = np.stack(states).astype(np.float32)        # (B, C, H, W)
