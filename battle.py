@@ -166,7 +166,7 @@ def battle_models(
         # Update root's evaluation function for current player
         root.policy_func = current_eval
         
-        print(f"Move {move_count + 1}: Player {current_player} ({'Black' if current_player == 1 else 'White'})")
+        # print(f"Move {move_count + 1}: Player {current_player} ({'Black' if current_player == 1 else 'White'})")
         
         # Make move
         start_time = time.time()
@@ -178,10 +178,10 @@ def battle_models(
         # Get move coordinates
         row, col = root.get_board().unflatten_index(action)
         
-        print(f"  Action: ({row}, {col}) in {move_time:.2f}s")
-        print(f"  Board state:")
-        print(root.get_board().render())
-        print()
+        # print(f"  Action: ({row}, {col}) in {move_time:.2f}s")
+        # print(f"  Board state:")
+        # print(root.get_board().render())
+        # print()
         
         # Check for game end
         winner = root.get_board().get_winner()
@@ -719,15 +719,17 @@ def main():
     # Create model manager
     # model_manager = ModelCheckpointManager(type(AlphaZeroNet), 
     #     "/Users/sjin2/PPP/AlphaKindaZero/after-fix")  
+    # model_manager = ModelCheckpointManager(type(AlphaZeroNet), 
+    #     "/Users/sjin2/PPP/AlphaKindaZero/8by8-le")
     model_manager = ModelCheckpointManager(type(AlphaZeroNet), 
-        "/Users/sjin2/PPP/AlphaKindaZero/8by8-le")
+        "/Users/sjin2/PPP/AlphaKindaZero/8by8-le-4")
     # Run comprehensive tournament for the latest 3 models
     # input_dim = (17, 11, 11)
     input_dim = (5, 8, 8)
 
     tournament_result = run_comprehensive_tournament(
         model_manager=model_manager,
-        model_indices=[0, 70],  # Latest 3 models
+        model_indices=[0, 100],  # Latest 3 models
         games_per_match=20,  # 10 games per model pair
         input_dim=input_dim,
         sim_count=100,   # 100 sims per move

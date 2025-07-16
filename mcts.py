@@ -107,7 +107,7 @@ class MCTSNode:
         # num_legal_actions = np.sum(self.legal_actions)
         alphas = np.ones_like(self.policy) * alpha
         noise = np.random.dirichlet(alphas)
-        print(f"Noise: {noise_ratio}, alpha: {alpha}")
+        # print(f"Noise: {noise_ratio}, alpha: {alpha}")
         self.policy = (1 - noise_ratio) * self.policy + noise_ratio * noise
     
     def get_v(self):
@@ -136,6 +136,7 @@ class MCTSNode:
         self.children_W = np.zeros(self.children_size, dtype=np.float32)
         self.children_N = np.zeros(self.children_size, dtype=np.float32)
         self.children_Q = np.zeros(self.children_size, dtype=np.float32)
+        self.N = 1
         self.children_index: Mapping[int, MCTSNode] = {}
     
     def reset_as_root(self):
@@ -212,14 +213,19 @@ class MCTSNode:
         print(f"To play {self.get_board().get_current_player()}, V: {self.get_v()}")
         next_node = self.commit_next_move()
         b = next_node.get_board().render();
+        b_stack_render = next_node.get_board().render_stack();
+
         print(f"===<commited one move inference> time {end_time - start_time}=====")
         print(b)
+        print("=" * 50)
+        print(b_stack_render)
         return next_node
 
     def expand_until_leaf_or_terminal(self, limit: int, c: float, action_fix = None) -> Tuple[MCTSNode, int]:
         tmp = self
         steps = 1
         while limit > 0:
+            self.N += 1
             if tmp.get_result() is not GameResult.UNDECIDED:
                 return (tmp, steps)
             next, is_new_node = tmp.expand(c, action_fix)
@@ -237,7 +243,7 @@ class MCTSNode:
         # print(f"start back! {v}")
         while tmp_parent is not None:
             tmp_parent.children_N[tmp_child.last_action] += 1
-            tmp_parent.N += 1
+            # tmp_parent.N += 1
             if tmp_parent.to_play == self.to_play:
                 # print("+")
                 tmp_parent.children_W[tmp_child.last_action] += v
@@ -297,7 +303,7 @@ def play_one_game(device: torch.device, inference_model: nn.Module) -> SelfPlayG
         print(f"Start sim {sim_count}")
         start_time = time.time()
         if step_count < 2:
-            root.add_noise(0.05, 0.75)
+            root.add_noise(0.03)
         else:
             root.add_noise(0.03)
         print(f"Step {step_count}")
@@ -307,22 +313,27 @@ def play_one_game(device: torch.device, inference_model: nn.Module) -> SelfPlayG
             node.back_update()
         end_time = time.time()
 
-        print(root.children_N[:-1].reshape(size, size))
         print(root.children_Q[:-1].reshape(size, size))
-        print(root.formula[:-1].reshape(size, size))
         print(root.policy[:-1].reshape(size, size))
+        print(root.formula[:-1].reshape(size, size))
+        print(root.children_N[:-1].reshape(size, size))
+        print(f"root.N: {root.N}")
         print(f"To play {root.get_board().get_current_player()}, V: {root.get_v()}")
+        # b_stack_render = root.get_board().render_stack();
+        # print("=" * 50)
+        # print(b_stack_render)
         game_buffer.add_sample(root.get_board().get_stack(), root.get_training_pi(1.0), root.get_board().get_current_player())
         next_node = root.commit_next_move()
         b = next_node.get_board().render();
         root = next_node
         print(f"===<commited one move> time {end_time - start_time}=====")
         print(b)
+
         step_count += 1
         res = root.get_result()
         if res is not GameResult.UNDECIDED:
             print(f"winner: {root.get_board().get_winner()}")
-            game_buffer.finalize_game(root.get_board().get_winner())
+            game_buffer.finalize_game(root.get_board().get_winner(), data_augmentation=True)
 
             break
     return game_buffer
@@ -349,7 +360,7 @@ def train_one_batch(replay_buffer: ReplayBuffer, model: nn.Module, lr_scheduler:
     
     states = torch.from_numpy(states).float().to(device)         # (B, C, H, W)
     policies = torch.from_numpy(policies).float().to(device)     # (B, A)
-    values = torch.from_numpy(values).float().to(device)         # (B, 1)
+    values = torch.from_numpy(values).float().to( device)         # (B, 1)
     optimizer.zero_grad()
 
     pi_loss, v_loss = compute_losses(model, states, policies, values)
@@ -425,7 +436,7 @@ def generate_replays_and_train(
     replay_buffer_path: str = "replay_buffer.pkl"
 ) -> ReplayBuffer:
     iteration = 0
-    buffer_refresh_count = 500.0
+    buffer_refresh_count = 2000.0
     while True:
         iteration += 1
         print(f"\n🔄 Training Iteration {iteration}")
@@ -453,7 +464,7 @@ def generate_replays_and_train(
             replay_buffer.replaced_samples = 0
         else:
             print(f"Full buffer not refreshed at iteration {iteration}, do a partial training {epoch} times")
-            batches = int(buffer_refresh_count * 3 / replay_buffer.batch_size) * epoch
+            batches = int(buffer_refresh_count * 2 / replay_buffer.batch_size) * epoch
             for i in range(0, batches):
                 train_one_batch(replay_buffer, training_model, lr_scheduler, optimizer, device)
         model_manager.save(training_model)
@@ -510,9 +521,27 @@ def main():
     else:
         print("User cpu")
         device = torch.device("cpu")
-    
-    model_manager = ModelCheckpointManager(type(AlphaZeroNet), "/Users/sjin2/PPP/AlphaKindaZero/8by8-le")
-    replay_buffer_path = "/Users/sjin2/PPP/AlphaKindaZero/8by8-le-replay-buffer.pkl"
+    # model_dir = "/Users/sjin2/PPP/AlphaKindaZero/8by8-le"
+    # model_dump_dir = os.path.join(model_dir, "dump")
+    # replay_buffer_path = "/Users/sjin2/PPP/AlphaKindaZero/8by8-le-replay-buffer.pkl"
+
+    # model_dir = "/Users/sjin2/PPP/AlphaKindaZero/8by8-le-2"
+    # model_dump_dir = os.path.join(model_dir, "dump")
+    # replay_buffer_path = "/Users/sjin2/PPP/AlphaKindaZero/8by8-le-2-replay-buffer.pkl"
+
+    # model_dir = "/Users/sjin2/PPP/AlphaKindaZero/8by8-le-3"
+    # model_dump_dir = os.path.join(model_dir, "dump")
+    # replay_buffer_path = "/Users/sjin2/PPP/AlphaKindaZero/8by8-le-3-replay-buffer.pkl"  
+
+    # model_dir = "/Users/sjin2/PPP/AlphaKindaZero/8by8-le-4"
+    # model_dump_dir = os.path.join(model_dir, "dump")
+    # replay_buffer_path = "/Users/sjin2/PPP/AlphaKindaZero/8by8-le-4-replay-buffer.pkl"
+
+    model_dir = "/Users/sjin2/PPP/AlphaKindaZero/8by8-le-aug"
+    model_dump_dir = os.path.join(model_dir, "dump")
+    replay_buffer_path = "/Users/sjin2/PPP/AlphaKindaZero/8by8-le-aug-replay-buffer.pkl"
+
+    model_manager = ModelCheckpointManager(type(AlphaZeroNet), model_dir)
     replay_buffer = load_or_create_replay_buffer(replay_buffer_path, 20000, 32)
 
     print("Start training with tournament evaluation!!!!!!")
@@ -524,7 +553,7 @@ def main():
         tournament_games=20,
         tournament_sims=100,
         early_stop_lead=5,
-        dump_dir="/Users/sjin2/PPP/AlphaKindaZero/8by8-le-dump",
+        dump_dir=model_dump_dir,
         replay_buffer_path=replay_buffer_path
     )
 

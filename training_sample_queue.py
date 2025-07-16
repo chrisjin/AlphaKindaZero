@@ -9,9 +9,36 @@ class TrainingSample:
         self.to_play = to_play            # 1 or 2
         self.result: Optional[float] = None  # final game outcome from this player's perspective
 
+    def __init__(self, state: np.ndarray, policy: np.ndarray, to_play: int, result: Optional[float] = None):
+        self.state = state                 # (C, H, W) numpy array
+        self.policy = policy              # (num_actions,) softmax probabilities from MCTS
+        self.to_play = to_play            # 1 or 2
+        self.result = result              # final game outcome from this player's perspective
+
     def set_result(self, z: float):
         """Set final outcome from this player's perspective (+1 win, -1 loss, 0 draw)"""
         self.result = z
+    
+    def extract_policy(self) -> Tuple[np.ndarray, float]:
+        """Extract the policy from the state"""
+        state_dim = self.state.shape[1:]
+        policy_matrix = self.policy[:-1].reshape(state_dim)
+        pass_move = self.policy[-1]
+        return policy_matrix, pass_move
+    
+    def reshape_back(self, policy_matrix: np.ndarray, pass_move: float) -> np.ndarray:
+        """Reshape the policy matrix back to the original shape"""
+        return np.concatenate([policy_matrix.flatten(), [pass_move]])
+
+    def policy_rot90(self, k: int, axis: Tuple[int, int] = (0, 1)) -> np.ndarray:
+        policy_matrix, pass_move = self.extract_policy()
+        rotated_policy_matrix = np.rot90(policy_matrix, k=k, axes=axis)
+        return self.reshape_back(rotated_policy_matrix, pass_move)
+    
+    def policy_flip(self, axis: int) -> np.ndarray:
+        policy_matrix, pass_move = self.extract_policy()
+        flipped_policy_matrix = np.flip(policy_matrix, axis=axis)
+        return self.reshape_back(flipped_policy_matrix, pass_move)
 
 
 class SelfPlayGameBuffer:
@@ -23,18 +50,56 @@ class SelfPlayGameBuffer:
         """Add a state, MCTS policy, and player to play"""
         self.samples.append(TrainingSample(state, policy, to_play))
 
-    def finalize_game(self, winner: int):
-        """Call this at game end to assign result to all samples"""
+    def finalize_game(self, winner: int, data_augmentation: bool = False):
+        """Call this at game end to assign result to all samples, with early steps less impactful."""
         self.final_result = winner
-        for sample in self.samples:
+        total_steps = len(self.samples)
+        for idx, sample in enumerate(self.samples):
+            # Current step: idx (0-based), so currentstep = idx
+            # Impact factor: 1 / sqrt(total_steps - idx)
+            impact = 1.0
+            # if total_steps - idx > 0:
+            #     impact = 1.0 / np.sqrt(total_steps - idx)
             if winner == 0 or winner is None:
                 sample.set_result(0)
             elif sample.to_play == winner:
-                print(f"set +1 for sample {winner}, {sample.to_play}")
-                sample.set_result(+1)
+                value = +1 * impact
+                print(f"set {value:.3f} for sample {winner}, {sample.to_play} (step {idx}, impact {impact:.3f})")
+                sample.set_result(value)
             else:
-                print(f"set -1 for sample {winner}, {sample.to_play}")
-                sample.set_result(-1)
+                value = -1 * impact
+                print(f"set {value:.3f} for sample {winner}, {sample.to_play} (step {idx}, impact {impact:.3f})")
+                sample.set_result(value)
+        if data_augmentation:
+            self.augment_data()
+    
+    def augment_data(self):
+        """Augment the data by flipping the board and swapping the player."""
+        new_samples = []
+        for sample in self.samples:
+            rotated_state = np.rot90(sample.state, k=1, axes=(1, 2))
+            rotated_policy = sample.policy_rot90(1)
+            new_samples.append(TrainingSample(rotated_state, rotated_policy, sample.to_play, sample.result))
+            rotated_state = np.rot90(sample.state, k=2, axes=(1, 2))
+            rotated_policy = sample.policy_rot90(2)
+            new_samples.append(TrainingSample(rotated_state, rotated_policy, sample.to_play, sample.result))
+            rotated_state = np.rot90(sample.state, k=3, axes=(1, 2))
+            rotated_policy = sample.policy_rot90(3)
+            new_samples.append(TrainingSample(rotated_state, rotated_policy, sample.to_play, sample.result))
+            
+            rotated_state = np.flip(sample.state, axis=1)
+            rotated_policy = sample.policy_flip(0)
+            new_samples.append(TrainingSample(rotated_state, rotated_policy, sample.to_play, sample.result))
+            rotated_state = np.flip(sample.state, axis=2)      
+            rotated_policy = sample.policy_flip(1)
+            new_samples.append(TrainingSample(rotated_state, rotated_policy, sample.to_play, sample.result))
+            rotated_state = np.flip(sample.state, axis=(1, 2))
+            rotated_policy = sample.policy_flip((0, 1))
+            new_samples.append(TrainingSample(rotated_state, rotated_policy, sample.to_play, sample.result))
+        self.samples.extend(new_samples)
+    
+        
+        
 
     def get_training_data(self) -> List[Tuple[np.ndarray, np.ndarray, float]]:
         """Return list of (state, policy, value) tuples for training"""
