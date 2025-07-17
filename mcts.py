@@ -65,7 +65,7 @@ def select_action(N: np.ndarray, policy: np.ndarray) -> Optional[int]:
             if policy[idx] > best_policy:
                 best_index = idx
                 best_policy = policy[idx]
-        print(f"Tie breaking: {best_index}")
+        print(f"Tie breaking: {best_index}, {best_policy}")
         return best_index
 
 class MCTSNode:
@@ -114,7 +114,7 @@ class MCTSNode:
         return self.v
 
     def pick_next_move(self) -> int:
-        return select_action(self.children_N, self.policy)
+        return select_action(self.children_N, self.formula)
         # num_mi = self.children_N[np.nonzero(self.children_N)]
         # mi = np.min(self.children_N[np.nonzero(self.children_N)])
         # ma = np.max(self.children_N)
@@ -299,13 +299,13 @@ def play_one_game(device: torch.device, inference_model: nn.Module) -> SelfPlayG
     root = MCTSNode(action_count, eval_position, board, 1);
     step_count = 0
     for i in range(0, 13 * 13):
-        sim_count = 200;
+        sim_count = 400;
         print(f"Start sim {sim_count}")
         start_time = time.time()
         if step_count < 2:
-            root.add_noise(0.03)
+            root.add_noise(0.01)
         else:
-            root.add_noise(0.03)
+            root.add_noise(0.01)
         print(f"Step {step_count}")
         while sim_count > 0:
             node, count = root.expand_until_leaf_or_terminal(sim_count, 1)

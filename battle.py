@@ -729,8 +729,8 @@ def main():
 
     tournament_result = run_comprehensive_tournament(
         model_manager=model_manager,
-        model_indices=range(10),  # Latest 3 models
-        games_per_match=4,  # 10 games per model pair
+        model_indices=[0, 250],  # Latest 3 models
+        games_per_match=20,  # 10 games per model pair
         input_dim=input_dim,
         sim_count=100,   # 100 sims per move
         temperature=1.0,
