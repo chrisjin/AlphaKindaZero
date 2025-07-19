@@ -721,15 +721,17 @@ def main():
     #     "/Users/sjin2/PPP/AlphaKindaZero/after-fix")  
     # model_manager = ModelCheckpointManager(type(AlphaZeroNet), 
     #     "/Users/sjin2/PPP/AlphaKindaZero/8by8-le")
+    # model_manager = ModelCheckpointManager(type(AlphaZeroNet), 
+    #     "/Users/sjin2/PPP/AlphaKindaZero/8by8-le-aug")
     model_manager = ModelCheckpointManager(type(AlphaZeroNet), 
-        "/Users/sjin2/PPP/AlphaKindaZero/8by8-le-aug")
+        "/Users/sjin2/PPP/AlphaKindaZero/8by8-last-move-prob")
     # Run comprehensive tournament for the latest 3 models
     # input_dim = (17, 11, 11)
-    input_dim = (5, 8, 8)
+    input_dim = (6, 8, 8)
 
     tournament_result = run_comprehensive_tournament(
         model_manager=model_manager,
-        model_indices=[0, 250],  # Latest 3 models
+        model_indices=[0, 30],  # Latest 3 models
         games_per_match=20,  # 10 games per model pair
         input_dim=input_dim,
         sim_count=100,   # 100 sims per move
