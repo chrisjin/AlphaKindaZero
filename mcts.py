@@ -114,8 +114,14 @@ class MCTSNode:
     def get_v(self):
         return self.v
 
-    def pick_next_move(self) -> int:
-        return select_action(self.children_N, self.formula)
+    def pick_next_move(self, choose_random: bool = False) -> Tuple[int, np.ndarray]:
+        pi = self.get_training_pi(1.0)
+        if choose_random:
+
+            action = np.random.choice(len(pi), p=pi)
+            return action, pi
+
+        return select_action(self.children_N, self.formula), pi
         # num_mi = self.children_N[np.nonzero(self.children_N)]
         # mi = np.min(self.children_N[np.nonzero(self.children_N)])
         # ma = np.max(self.children_N)
@@ -127,8 +133,10 @@ class MCTSNode:
         #     return action
         # return np.argmax(self.children_N)
     
-    def commit_next_move(self) -> MCTSNode:
-        action = self.pick_next_move()
+    def commit_next_move(self, choose_random: bool = False) -> MCTSNode:
+        action, pi = self.pick_next_move(choose_random)
+        (row, col) = self.board.unflatten_index(action)
+        print(f"To commit next move: {row}, {col}, chosen: {self.children_N[action]}, pi: {pi[action]}")
         child_node = self.children_index[action]
         child_node.reset_as_root();
         return child_node
@@ -324,7 +332,7 @@ def play_one_game(device: torch.device, inference_model: nn.Module) -> SelfPlayG
         # print("=" * 50)
         # print(b_stack_render)
         game_buffer.add_sample(root.get_board().get_stack(), root.get_training_pi(1.0), root.get_board().get_current_player())
-        next_node = root.commit_next_move()
+        next_node = root.commit_next_move(choose_random=True)
         b = next_node.get_board().render();
         root = next_node
         print(f"===<commited one move> time {end_time - start_time}=====")
@@ -459,7 +467,7 @@ def generate_replays_and_train(
 
         lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[100000, 200000], gamma=0.1)
         full_buffer_refreshed_iterations = int(replay_buffer.max_samples / buffer_refresh_count)
-        train_on_latest_model_epoch(replay_buffer, model_manager, training_model, device, 5, lr_scheduler, optimizer)
+        train_on_latest_model_epoch(replay_buffer, model_manager, training_model, device, 15, lr_scheduler, optimizer)
         # if replay_buffer.replaced_samples > replay_buffer.max_samples:
         #     print(f"Full buffer refreshed at iteration {iteration}, do a full training")
         #     train_on_latest_model_epoch(replay_buffer, model_manager, training_model, device, 5, lr_scheduler, optimizer)
@@ -547,9 +555,13 @@ def main():
     # model_dump_dir = os.path.join(model_dir, "dump")
     # replay_buffer_path = "/Users/sjin2/PPP/AlphaKindaZero/8by8-le-aug-2-replay-buffer.pkl"
 
-    model_dir = "/Users/sjin2/PPP/AlphaKindaZero/8by8-last-move"
+    # model_dir = "/Users/sjin2/PPP/AlphaKindaZero/8by8-last-move"
+    # model_dump_dir = os.path.join(model_dir, "dump")
+    # replay_buffer_path = "/Users/sjin2/PPP/AlphaKindaZero/8by8-last-move-replay-buffer.pkl"
+
+    model_dir = "/Users/sjin2/PPP/AlphaKindaZero/8by8-last-move-prob"
     model_dump_dir = os.path.join(model_dir, "dump")
-    replay_buffer_path = "/Users/sjin2/PPP/AlphaKindaZero/8by8-last-move-replay-buffer.pkl"
+    replay_buffer_path = "/Users/sjin2/PPP/AlphaKindaZero/8by8-last-move-prob-replay-buffer.pkl"
 
 
     model_manager = ModelCheckpointManager(type(AlphaZeroNet), model_dir)
