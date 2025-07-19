@@ -45,6 +45,7 @@ class SelfPlayGameBuffer:
     def __init__(self):
         self.samples: List[TrainingSample] = []
         self.final_result: Optional[int] = None  # +1 = win for player 1, -1 = win for player 2, 0 = draw
+        self.winner = -1
 
     def add_sample(self, state: np.ndarray, policy: np.ndarray, to_play: int):
         """Add a state, MCTS policy, and player to play"""
@@ -54,6 +55,7 @@ class SelfPlayGameBuffer:
         """Call this at game end to assign result to all samples, with early steps less impactful."""
         self.final_result = winner
         total_steps = len(self.samples)
+        self.winner = winner
         for idx, sample in enumerate(self.samples):
             # Current step: idx (0-based), so currentstep = idx
             # Impact factor: 1 / sqrt(total_steps - idx)
@@ -120,11 +122,38 @@ class ReplayBuffer:
         self.buffer: List[Tuple[np.ndarray, np.ndarray, float]] = []
         self.full = False
         self.replaced_samples = 0
+        self.black_wins_samples = 0.0
+        self.white_wins_samples = 0.0
+    
 
     def add_game(self, game_buffer: SelfPlayGameBuffer) -> int:
+        if not hasattr(self, 'black_wins_samples'):
+            self.black_wins_samples = 0.0
+            self.white_wins_samples = 0.0
+
         """Add all samples from one finished game"""
+        if game_buffer.winner == 1:
+            self.black_wins_samples += len(game_buffer.samples)
+        elif game_buffer.winner == 2:
+            self.white_wins_samples += len(game_buffer.samples)
+        
         samples = game_buffer.get_training_data()
         self.buffer.extend(samples)
+        if self.black_wins_samples - self.white_wins_samples >= 120:
+            if game_buffer.winner == 2:
+                print(f"white wins: {self.white_wins_samples}, black wins: {self.black_wins_samples}. Duplicate white samples")
+                self.buffer.extend(samples)
+                self.white_wins_samples += len(samples)
+        elif self.white_wins_samples - self.black_wins_samples >= 120:
+            if game_buffer.winner == 1:
+                print(f"white wins: {self.white_wins_samples}, black wins: {self.black_wins_samples}. Duplicate black samples")
+                self.buffer.extend(samples)
+                self.black_wins_samples += len(samples)
+        
+        if abs(self.black_wins_samples - self.white_wins_samples) >= 15000:
+            print(f"Resetting black and white wins samples. current black wins: {self.black_wins_samples}, white wins: {self.white_wins_samples}")
+            self.white_wins_samples = 0.0
+            self.black_wins_samples = 0.0
 
         # FIFO eviction
         excess = len(self.buffer) - self.max_samples

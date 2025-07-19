@@ -109,6 +109,7 @@ class MCTSNode:
         noise = np.random.dirichlet(alphas)
         # print(f"Noise: {noise_ratio}, alpha: {alpha}")
         self.policy = (1 - noise_ratio) * self.policy + noise_ratio * noise
+        return (alpha, noise_ratio)
     
     def get_v(self):
         return self.v
@@ -182,7 +183,7 @@ class MCTSNode:
         if action_fix is not None:
             action = action_fix
         else:
-            formula, action = self.calc_formula(1)
+            formula, action = self.calc_formula(5.0)
         row, col = self.board.unflatten_index(action)
 
 
@@ -225,7 +226,6 @@ class MCTSNode:
         tmp = self
         steps = 1
         while limit > 0:
-            self.N += 1
             if tmp.get_result() is not GameResult.UNDECIDED:
                 return (tmp, steps)
             next, is_new_node = tmp.expand(c, action_fix)
@@ -243,7 +243,7 @@ class MCTSNode:
         # print(f"start back! {v}")
         while tmp_parent is not None:
             tmp_parent.children_N[tmp_child.last_action] += 1
-            # tmp_parent.N += 1
+            tmp_parent.N += 1
             if tmp_parent.to_play == self.to_play:
                 # print("+")
                 tmp_parent.children_W[tmp_child.last_action] += v
@@ -302,11 +302,12 @@ def play_one_game(device: torch.device, inference_model: nn.Module) -> SelfPlayG
         sim_count = 400;
         print(f"Start sim {sim_count}")
         start_time = time.time()
-        if step_count < 2:
-            root.add_noise(0.01)
-        else:
-            root.add_noise(0.01)
-        print(f"Step {step_count}")
+        # if step_count < 7 and root.get_board().get_current_player() == 2:
+        #     (noise_alpha, noise_ratio) = root.add_noise(0.03, 0.5)
+        # else:
+        #     (noise_alpha, noise_ratio) = root.add_noise(0.03)
+        (noise_alpha, noise_ratio) = root.add_noise(0.03)
+        print(f"Step {step_count}, current player: {root.get_board().get_current_player()}, noise: {noise_alpha}, {noise_ratio}")
         while sim_count > 0:
             node, count = root.expand_until_leaf_or_terminal(sim_count, 1)
             sim_count -= count
@@ -318,7 +319,7 @@ def play_one_game(device: torch.device, inference_model: nn.Module) -> SelfPlayG
         print(root.formula[:-1].reshape(size, size))
         print(root.children_N[:-1].reshape(size, size))
         print(f"root.N: {root.N}")
-        print(f"To play {root.get_board().get_current_player()}, V: {root.get_v()}")
+        print(f"To play {root.get_board().get_current_player()}, V: {root.get_v()}, noise: {noise_alpha}, {noise_ratio}")
         # b_stack_render = root.get_board().render_stack();
         # print("=" * 50)
         # print(b_stack_render)
@@ -458,15 +459,16 @@ def generate_replays_and_train(
 
         lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[100000, 200000], gamma=0.1)
         full_buffer_refreshed_iterations = int(replay_buffer.max_samples / buffer_refresh_count)
-        if replay_buffer.replaced_samples > replay_buffer.max_samples:
-            print(f"Full buffer refreshed at iteration {iteration}, do a full training")
-            train_on_latest_model_epoch(replay_buffer, model_manager, training_model, device, 2, lr_scheduler, optimizer)
-            replay_buffer.replaced_samples = 0
-        else:
-            print(f"Full buffer not refreshed at iteration {iteration}, do a partial training {epoch} times")
-            batches = int(buffer_refresh_count * 3 / replay_buffer.batch_size) * epoch
-            for i in range(0, batches):
-                train_one_batch(replay_buffer, training_model, lr_scheduler, optimizer, device)
+        train_on_latest_model_epoch(replay_buffer, model_manager, training_model, device, 5, lr_scheduler, optimizer)
+        # if replay_buffer.replaced_samples > replay_buffer.max_samples:
+        #     print(f"Full buffer refreshed at iteration {iteration}, do a full training")
+        #     train_on_latest_model_epoch(replay_buffer, model_manager, training_model, device, 5, lr_scheduler, optimizer)
+        #     replay_buffer.replaced_samples = 0
+        # else:
+        #     print(f"Full buffer not refreshed at iteration {iteration}, do a partial training {epoch} times")
+        #     batches = int(buffer_refresh_count * 3 / replay_buffer.batch_size) * epoch
+        #     for i in range(0, batches):
+        #         train_one_batch(replay_buffer, training_model, lr_scheduler, optimizer, device)
         model_manager.save(training_model)
         
         # After training, run tournament between current model (index 0) and previous model (index 1)
@@ -537,12 +539,16 @@ def main():
     # model_dump_dir = os.path.join(model_dir, "dump")
     # replay_buffer_path = "/Users/sjin2/PPP/AlphaKindaZero/8by8-le-4-replay-buffer.pkl"
 
-    model_dir = "/Users/sjin2/PPP/AlphaKindaZero/8by8-le-aug"
+    # model_dir = "/Users/sjin2/PPP/AlphaKindaZero/8by8-le-aug"
+    # model_dump_dir = os.path.join(model_dir, "dump")
+    # replay_buffer_path = "/Users/sjin2/PPP/AlphaKindaZero/8by8-le-aug-replay-buffer.pkl"
+
+    model_dir = "/Users/sjin2/PPP/AlphaKindaZero/8by8-le-aug-2"
     model_dump_dir = os.path.join(model_dir, "dump")
-    replay_buffer_path = "/Users/sjin2/PPP/AlphaKindaZero/8by8-le-aug-replay-buffer.pkl"
+    replay_buffer_path = "/Users/sjin2/PPP/AlphaKindaZero/8by8-le-aug-2-replay-buffer.pkl"
 
     model_manager = ModelCheckpointManager(type(AlphaZeroNet), model_dir)
-    replay_buffer = load_or_create_replay_buffer(replay_buffer_path, 20000, 32)
+    replay_buffer = load_or_create_replay_buffer(replay_buffer_path, 20000, 512)
 
     print("Start training with tournament evaluation!!!!!!")
     generate_replays_and_train(
