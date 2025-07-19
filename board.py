@@ -26,6 +26,10 @@ class Board:
         self.to_play = 1  # Player 1 goes first
         self.queue.push_board(self.current_board)
         self.queue.set_player(self.to_play == 1)
+        self.last_move = None
+    
+    def number_of_features(self) -> int:
+        return self.queue.total_plane_count()
 
     def current_binary_board(self) -> np.ndarray:
         if self.to_play == 1:
@@ -41,7 +45,7 @@ class Board:
         binary_board = self.current_binary_board()
         binary_board[row, col] = 1
         # Push the plane for the player who just moved **before** we flip `to_play`
-        self.queue.push_board(binary_board.copy())
+        self.queue.push_board(binary_board.copy(), (row, col))
         # Now switch to the next player and update the indicator mask
         self.to_play = 3 - self.to_play  # 1 ↔ 2
         self.queue.set_player(self.to_play == 1)

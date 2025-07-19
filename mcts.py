@@ -263,13 +263,13 @@ class MCTSNode:
         return self.board
 
 size = 8;
-input_dim = (5, size, size)
+input_dim = (6, size, size)
 action_count = size * size + 1
 
 def play_one_game(device: torch.device, inference_model: nn.Module) -> SelfPlayGameBuffer:
     game_buffer = SelfPlayGameBuffer()
 
-    board = FiveInARowBoard((size, size), input_dim[0] - 1)
+    board = FiveInARowBoard((size, size), input_dim[0] - 2)
     b = board.render();
     network = inference_model
     @torch.no_grad()
@@ -543,9 +543,14 @@ def main():
     # model_dump_dir = os.path.join(model_dir, "dump")
     # replay_buffer_path = "/Users/sjin2/PPP/AlphaKindaZero/8by8-le-aug-replay-buffer.pkl"
 
-    model_dir = "/Users/sjin2/PPP/AlphaKindaZero/8by8-le-aug-2"
+    # model_dir = "/Users/sjin2/PPP/AlphaKindaZero/8by8-le-aug-2"
+    # model_dump_dir = os.path.join(model_dir, "dump")
+    # replay_buffer_path = "/Users/sjin2/PPP/AlphaKindaZero/8by8-le-aug-2-replay-buffer.pkl"
+
+    model_dir = "/Users/sjin2/PPP/AlphaKindaZero/8by8-last-move"
     model_dump_dir = os.path.join(model_dir, "dump")
-    replay_buffer_path = "/Users/sjin2/PPP/AlphaKindaZero/8by8-le-aug-2-replay-buffer.pkl"
+    replay_buffer_path = "/Users/sjin2/PPP/AlphaKindaZero/8by8-last-move-replay-buffer.pkl"
+
 
     model_manager = ModelCheckpointManager(type(AlphaZeroNet), model_dir)
     replay_buffer = load_or_create_replay_buffer(replay_buffer_path, 20000, 512)
