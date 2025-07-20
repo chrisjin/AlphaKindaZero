@@ -318,7 +318,7 @@ def play_one_game(device: torch.device, inference_model: nn.Module) -> SelfPlayG
         print(f"Step {step_count}, current player: {root.get_board().get_current_player()}, noise: {noise_alpha}, {noise_ratio}")
         while sim_count > 0:
             node, count = root.expand_until_leaf_or_terminal(sim_count, 1)
-            sim_count -= count
+            sim_count -= 1
             node.back_update()
         end_time = time.time()
 
