@@ -114,8 +114,8 @@ class MCTSNode:
     def get_v(self):
         return self.v
 
-    def pick_next_move(self, choose_random: bool = False) -> Tuple[int, np.ndarray]:
-        pi = self.get_training_pi(1.0)
+    def pick_next_move(self, choose_random: bool = False, temperature: float = 1.0) -> Tuple[int, np.ndarray]:
+        pi = self.get_training_pi(temperature)
         if choose_random:
 
             action = np.random.choice(len(pi), p=pi)
@@ -133,8 +133,8 @@ class MCTSNode:
         #     return action
         # return np.argmax(self.children_N)
     
-    def commit_next_move(self, choose_random: bool = False) -> MCTSNode:
-        action, pi = self.pick_next_move(choose_random)
+    def commit_next_move(self, choose_random: bool = False, temperature: float = 1.0) -> MCTSNode:
+        action, pi = self.pick_next_move(choose_random, temperature)
         (row, col) = self.board.unflatten_index(action)
         print(f"To commit next move: {row}, {col}, chosen: {self.children_N[action]}, pi: {pi[action] * (self.children_N[action] == self.children_N).sum()}")
         child_node = self.children_index[action]
@@ -332,7 +332,7 @@ def play_one_game(device: torch.device, inference_model: nn.Module) -> SelfPlayG
         # print("=" * 50)
         # print(b_stack_render)
         game_buffer.add_sample(root.get_board().get_stack(), root.get_training_pi(1.0), root.get_board().get_current_player())
-        next_node = root.commit_next_move(choose_random=True)
+        next_node = root.commit_next_move(choose_random=True, temperature=0.7)
         b = next_node.get_board().render();
         root = next_node
         print(f"===<commited one move> time {end_time - start_time}=====")
@@ -373,7 +373,7 @@ def train_one_batch(replay_buffer: ReplayBuffer, model: nn.Module, lr_scheduler:
     optimizer.zero_grad()
 
     pi_loss, v_loss = compute_losses(model, states, policies, values)
-    loss = pi_loss + v_loss
+    loss = pi_loss + 0.5 * v_loss
     loss.backward()
     optimizer.step()
     lr_scheduler.step()
