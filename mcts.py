@@ -96,12 +96,22 @@ class MCTSNode:
                 self.v = 1.0
             else:
                 self.v = -1.0
+            # print(f"MCTS reached terminal: {winner}, {self.v}, {self.to_play}")
+
         else:
             policy_arr, v_arr = self.policy_func(input)
             v = v_arr[0];
             policy = policy_arr[0];
             self.v = v
             self.policy = policy
+    
+    def play_out_match_policy(self) -> bool:
+        choice_policy = np.argmax(self.policy)
+        choice_from_N = np.argmax(self.children_N)
+        return choice_policy == choice_from_N
+
+    def count_total_children(self):
+        return sum([child.count_total_children() for child in self.children_index.values()]) + 1
     
     def add_noise(self, alpha: float = 0.03, noise_ratio: float = 0.25):
         # num_legal_actions = np.sum(self.legal_actions)
@@ -117,7 +127,7 @@ class MCTSNode:
     def pick_next_move(self, choose_random: bool = False, temperature: float = 1.0) -> Tuple[int, np.ndarray]:
         pi = self.get_training_pi(temperature)
         if choose_random:
-
+            print(f"Random choice: \n{pi[:-1].reshape(size, size)}")
             action = np.random.choice(len(pi), p=pi)
             return action, pi
 
@@ -139,6 +149,7 @@ class MCTSNode:
         print(f"To commit next move: {row}, {col}, chosen: {self.children_N[action]}, pi: {pi[action] * (self.children_N[action] == self.children_N).sum()}")
         child_node = self.children_index[action]
         child_node.reset_as_root();
+        print(f"Total children: {child_node.count_total_children()}")
         return child_node
 
     def partial_reset(self):
@@ -146,7 +157,7 @@ class MCTSNode:
         self.children_N = np.zeros(self.children_size, dtype=np.float32)
         self.children_Q = np.zeros(self.children_size, dtype=np.float32)
         self.N = 1
-        self.children_index: Mapping[int, MCTSNode] = {}
+        # self.children_index: Mapping[int, MCTSNode] = {}
     
     def reset_as_root(self):
         self.partial_reset()
@@ -191,7 +202,7 @@ class MCTSNode:
         if action_fix is not None:
             action = action_fix
         else:
-            formula, action = self.calc_formula(5.0)
+            formula, action = self.calc_formula(c)
         row, col = self.board.unflatten_index(action)
 
 
@@ -306,6 +317,7 @@ def play_one_game(device: torch.device, inference_model: nn.Module) -> SelfPlayG
         return pi, v
     root = MCTSNode(action_count, eval_position, board, 1);
     step_count = 0
+    match_count = 0
     for i in range(0, 13 * 13):
         sim_count = 400;
         print(f"Start sim {sim_count}")
@@ -317,7 +329,7 @@ def play_one_game(device: torch.device, inference_model: nn.Module) -> SelfPlayG
         (noise_alpha, noise_ratio) = root.add_noise(0.03)
         print(f"Step {step_count}, current player: {root.get_board().get_current_player()}, noise: {noise_alpha}, {noise_ratio}")
         while sim_count > 0:
-            node, count = root.expand_until_leaf_or_terminal(sim_count, 1)
+            node, count = root.expand_until_leaf_or_terminal(sim_count, 2.0)
             sim_count -= 1
             node.back_update()
         end_time = time.time()
@@ -332,7 +344,9 @@ def play_one_game(device: torch.device, inference_model: nn.Module) -> SelfPlayG
         # print("=" * 50)
         # print(b_stack_render)
         game_buffer.add_sample(root.get_board().get_stack(), root.get_training_pi(1.0), root.get_board().get_current_player())
-        next_node = root.commit_next_move(choose_random=True, temperature=0.7)
+        if root.play_out_match_policy():
+            match_count += 1
+        next_node = root.commit_next_move(choose_random=True, temperature=1.0)
         b = next_node.get_board().render();
         root = next_node
         print(f"===<commited one move> time {end_time - start_time}=====")
@@ -341,7 +355,7 @@ def play_one_game(device: torch.device, inference_model: nn.Module) -> SelfPlayG
         step_count += 1
         res = root.get_result()
         if res is not GameResult.UNDECIDED:
-            print(f"winner: {root.get_board().get_winner()}")
+            print(f"winner: {root.get_board().get_winner()}, match rate: {match_count / step_count}")
             game_buffer.finalize_game(root.get_board().get_winner(), data_augmentation=True)
 
             break
@@ -373,7 +387,7 @@ def train_one_batch(replay_buffer: ReplayBuffer, model: nn.Module, lr_scheduler:
     optimizer.zero_grad()
 
     pi_loss, v_loss = compute_losses(model, states, policies, values)
-    loss = pi_loss + 0.5 * v_loss
+    loss = pi_loss + v_loss
     loss.backward()
     optimizer.step()
     lr_scheduler.step()
@@ -446,6 +460,10 @@ def generate_replays_and_train(
 ) -> ReplayBuffer:
     iteration = 0
     buffer_refresh_count = 1000.0
+    training_model = load_latest_model(model_manager, device)
+    optimizer = torch.optim.Adam(training_model.parameters(), lr=1e-3, weight_decay=1e-4)
+
+    lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[100000, 200000], gamma=0.1)
     while True:
         iteration += 1
         print(f"\n🔄 Training Iteration {iteration}")
@@ -462,10 +480,7 @@ def generate_replays_and_train(
             device=device
         )
         save_replay_buffer(replay_buffer, replay_buffer_path)
-        training_model = load_latest_model(model_manager, device)
-        optimizer = torch.optim.Adam(training_model.parameters(), lr=1e-4, weight_decay=1e-4)
 
-        lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[100000, 200000], gamma=0.1)
         full_buffer_refreshed_iterations = int(replay_buffer.max_samples / buffer_refresh_count)
         train_on_latest_model_epoch(replay_buffer, model_manager, training_model, device, 8, lr_scheduler, optimizer)
         # if replay_buffer.replaced_samples > replay_buffer.max_samples:
@@ -483,41 +498,41 @@ def generate_replays_and_train(
         print(f"\n🏆 Running tournament to evaluate new model...")
         
         # Import battle functions
-        from battle import run_tournament_and_dump_loser
+        # from battle import run_tournament_and_dump_loser
         
-        # Only run tournament if there are at least 2 models available
-        if len(model_manager.get_checkpoint_files()) > 1:
-            try:
-                tournament_result = run_tournament_and_dump_loser(
-                    model_manager=model_manager,
-                    model1_index=0,  # Current model (latest)
-                    model2_index=1,  # Previous model
-                    num_games=tournament_games,
-                    input_dim=input_dim,
-                    sim_count=tournament_sims,
-                    temperature=1.0,
-                    add_noise=True,
-                    device=device,
-                    dump_dir=dump_dir,
-                    early_stop_lead=early_stop_lead
-                )
+        # # Only run tournament if there are at least 2 models available
+        # if len(model_manager.get_checkpoint_files()) > 1:
+        #     try:
+        #         tournament_result = run_tournament_and_dump_loser(
+        #             model_manager=model_manager,
+        #             model1_index=0,  # Current model (latest)
+        #             model2_index=1,  # Previous model
+        #             num_games=tournament_games,
+        #             input_dim=input_dim,
+        #             sim_count=tournament_sims,
+        #             temperature=1.0,
+        #             add_noise=True,
+        #             device=device,
+        #             dump_dir=dump_dir,
+        #             early_stop_lead=early_stop_lead
+        #         )
                 
-                # Check if the current model (index 0) lost
-                if tournament_result['dump_info']['winner_index'] == 1:  # Previous model won
-                    print(f"💀 Current model (index 0) lost to previous model (index 1)")
-                    print(f"🗑️  Current model was moved to {dump_dir}")
-                    print(f"🔄 Continuing training with previous model...")
-                elif tournament_result['dump_info']['winner_index'] == 0:  # Current model won
-                    print(f"✅ Current model (index 0) won against previous model (index 1)")
-                    print(f"🗑️  Previous model was moved to {dump_dir}")
-                else:
-                    print(f"🤝 Tournament ended in a tie - both models moved to {dump_dir}")
+        #         # Check if the current model (index 0) lost
+        #         if tournament_result['dump_info']['winner_index'] == 1:  # Previous model won
+        #             print(f"💀 Current model (index 0) lost to previous model (index 1)")
+        #             print(f"🗑️  Current model was moved to {dump_dir}")
+        #             print(f"🔄 Continuing training with previous model...")
+        #         elif tournament_result['dump_info']['winner_index'] == 0:  # Current model won
+        #             print(f"✅ Current model (index 0) won against previous model (index 1)")
+        #             print(f"🗑️  Previous model was moved to {dump_dir}")
+        #         else:
+        #             print(f"🤝 Tournament ended in a tie - both models moved to {dump_dir}")
                     
-            except Exception as e:
-                print(f"⚠️  Tournament failed: {e}")
-                print(f"🔄 Continuing training without tournament evaluation...")
-        else:
-            print("⚠️  Not enough models to run tournament (need at least 2). Skipping tournament evaluation.")
+        #     except Exception as e:
+        #         print(f"⚠️  Tournament failed: {e}")
+        #         print(f"🔄 Continuing training without tournament evaluation...")
+        # else:
+        #     print("⚠️  Not enough models to run tournament (need at least 2). Skipping tournament evaluation.")
 
 def main():
     np.set_printoptions(formatter={'float': lambda x: "{0:0.3f}".format(x)})
@@ -559,10 +574,21 @@ def main():
     # model_dump_dir = os.path.join(model_dir, "dump")
     # replay_buffer_path = "/Users/sjin2/PPP/AlphaKindaZero/8by8-last-move-replay-buffer.pkl"
 
-    model_dir = "/Users/sjin2/PPP/AlphaKindaZero/8by8-last-move-prob"
-    model_dump_dir = os.path.join(model_dir, "dump")
-    replay_buffer_path = "/Users/sjin2/PPP/AlphaKindaZero/8by8-last-move-prob-replay-buffer.pkl"
+    # model_dir = "/Users/sjin2/PPP/AlphaKindaZero/8by8-last-move-prob"
+    # model_dump_dir = os.path.join(model_dir, "dump")
+    # replay_buffer_path = "/Users/sjin2/PPP/AlphaKindaZero/8by8-last-move-prob-replay-buffer.pkl"
 
+    # model_dir = "/Users/sjin2/PPP/AlphaKindaZero/8by8-last-move-prob-2"
+    # model_dump_dir = os.path.join(model_dir, "dump")
+    # replay_buffer_path = "/Users/sjin2/PPP/AlphaKindaZero/8by8-last-move-prob-2-replay-buffer.pkl"
+
+    # model_dir = "/Users/sjin2/PPP/AlphaKindaZero/8by8-last-move-prob-3"
+    # model_dump_dir = os.path.join(model_dir, "dump")
+    # replay_buffer_path = "/Users/sjin2/PPP/AlphaKindaZero/8by8-last-move-prob-3-replay-buffer.pkl"
+
+    model_dir = "/Users/sjin2/PPP/AlphaKindaZero/8by8-last-move-prob-4"
+    model_dump_dir = os.path.join(model_dir, "dump")
+    replay_buffer_path = "/Users/sjin2/PPP/AlphaKindaZero/8by8-last-move-prob-4-replay-buffer.pkl"
 
     model_manager = ModelCheckpointManager(type(AlphaZeroNet), model_dir)
     replay_buffer = load_or_create_replay_buffer(replay_buffer_path, 20000, 512)

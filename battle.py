@@ -35,7 +35,7 @@ def run_simulations_and_make_move(
     # Run simulations using existing expand_until_leaf_or_terminal and back_update
     while sim_count > 0:
         node, count = root.expand_until_leaf_or_terminal(sim_count, 1)
-        sim_count -= count
+        sim_count -= 1
         node.back_update()
     
     # Select action based on temperature
@@ -691,8 +691,8 @@ def run_tournament_and_dump_loser(
             os.makedirs(dump_dir, exist_ok=True)
             
             # Move the newer (losing) model to dump
-            success = model_manager.move_model_by_index(newer_model_index, dump_dir, move_file=True)
-            
+            # success = model_manager.move_model_by_index(newer_model_index, dump_dir, move_file=True)
+            print("Not dump for now")
             if success:
                 print(f"🗑️  Moved newer model {newer_model_index} to {dump_dir}")
             else:
@@ -714,6 +714,251 @@ def run_tournament_and_dump_loser(
     return tournament_result
 
 
+def battle_model_vs_random_high_sim(
+    model_manager: ModelCheckpointManager,
+    fixed_model_index: int,
+    fixed_sim_count: int,
+    high_sim_count: int = 1600,
+    input_dim: Tuple[int, int, int] = (17, 11, 11),
+    temperature: float = 1.0,
+    add_noise: bool = False,
+    device: torch.device = None
+) -> dict:
+    """Battle a specified model against a randomly chosen opponent that plays with more simulations.
+
+    Args:
+        model_manager: Checkpoint manager handling saved models.
+        fixed_model_index: Index of the model that will use `fixed_sim_count` sims each move.
+        fixed_sim_count: Simulation budget for the fixed model.
+        high_sim_count: Simulation budget for the randomly chosen opponent (default 1600).
+        input_dim: (C, H, W) tuple describing network input.
+        temperature: Temperature for move selection.
+        add_noise: Whether to add Dirichlet noise at the root of *each* search.
+        device: Torch device; defaults to MPS if available else CPU.
+
+    Returns:
+        A dictionary summarising the match outcome.
+    """
+    import random
+
+    if device is None:
+        device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+
+    board_size = (input_dim[1], input_dim[2])
+    action_count = board_size[0] * board_size[1] + 1
+
+    # Build list of candidate indices excluding the fixed one
+    candidate_indices = [i for i in range(len(model_manager.get_checkpoint_files())) if i != fixed_model_index]
+    if not candidate_indices:
+        raise ValueError("No other models available to serve as opponent.")
+
+    opponent_index = random.choice(candidate_indices)
+
+    print(f"🎲 Randomly selected opponent model index: {opponent_index}")
+
+    # Load both models
+    fixed_model = load_model_by_index(model_manager, fixed_model_index, input_dim, action_count, device)
+    opponent_model = load_model_by_index(model_manager, opponent_index, input_dim, action_count, device)
+
+    eval_fixed = create_eval_function(fixed_model, device)
+    eval_opp = create_eval_function(opponent_model, device)
+
+    # Initialise game (fixed model always plays Black for determinism)
+    board = FiveInARowBoard(board_size, input_dim[0] - 2)
+    root = MCTSNode(action_count, eval_fixed, board, 1)
+
+    move_count = 0
+    max_moves = board_size[0] * board_size[1]
+
+    print("\n🥊 Starting duel:")
+    print(f"  • Model {fixed_model_index} (Black) – {fixed_sim_count} sims/move")
+    print(f"  • Model {opponent_index} (White) – {high_sim_count} sims/move")
+    print("  • Temperature:", temperature, " Add noise:", add_noise)
+    print("  • Board size:", board_size)
+    print("-"*50)
+
+    while move_count < max_moves:
+        current_player = root.get_board().get_current_player()
+        if current_player == 1:
+            current_eval = eval_fixed
+            current_sims = fixed_sim_count
+        else:
+            current_eval = eval_opp
+            current_sims = high_sim_count
+
+        # Update evaluation fn for root
+        root.policy_func = current_eval
+
+        # Run MCTS and take move
+        root, _ = run_simulations_and_make_move(root, current_sims, temperature, add_noise)
+
+        winner = root.get_board().get_winner()
+        if winner is not None:
+            break
+
+        move_count += 1
+
+    winner = root.get_board().get_winner()
+    if winner is None and move_count >= max_moves:
+        winner = 0  # draw
+
+    result = {
+        "winner": winner,
+        "moves": move_count,
+        "fixed_model_index": fixed_model_index,
+        "opponent_index": opponent_index,
+        "settings": {
+            "fixed_sim_count": fixed_sim_count,
+            "opponent_sim_count": high_sim_count,
+            "temperature": temperature,
+            "add_noise": add_noise,
+            "input_dim": input_dim,
+            "board_size": board_size,
+        },
+    }
+
+    print("-"*50)
+    outcome = "draw" if winner == 0 else ("Black" if winner == 1 else "White")
+    print(f" Result: {outcome}. Moves: {move_count}")
+    return result
+
+
+def run_tournament_vs_untrained(
+    model_manager: ModelCheckpointManager,
+    fixed_model_index: int = 0,
+    num_games: int = 10,
+    input_dim: Tuple[int, int, int] = (17, 11, 11),
+    fixed_sim_count: int = 400,
+    random_sim_count: int = 1600,
+    temperature: float = 1.0,
+    add_noise: bool = False,
+    device: torch.device = None
+) -> dict:
+    """Run a tournament where a given checkpoint fights an untrained (random-weight) model.
+
+    The colours alternate every game: even-numbered games (0,2,4,…) the trained model plays
+    Black; odd-numbered games it plays White.  Simulation budgets can differ.
+
+    Args:
+        model_manager: Checkpoint manager holding trained models.
+        fixed_model_index: Index (0 = latest) of the trained model to evaluate.
+        num_games: Total number of games to play.
+        input_dim: (C,H,W) expected by the network.
+        fixed_sim_count: Sims per move for the trained model.
+        random_sim_count: Sims per move for the untrained model.
+        temperature: Action-selection temperature.
+        add_noise: Whether to add Dirichlet noise at each root.
+        device: Torch device (auto-select if None).
+
+    Returns:
+        Summary dict with wins/losses/draws and detailed settings.
+    """
+
+    if device is None:
+        device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+
+    board_size = (input_dim[1], input_dim[2])
+    action_count = board_size[0] * board_size[1] + 1
+
+    # Load trained model
+    fixed_model = load_model_by_index(model_manager, fixed_model_index, input_dim, action_count, device)
+
+    # Build evaluation functions
+    eval_fixed = create_eval_function(fixed_model, device)
+
+    # Uniform evaluator for the untrained opponent: returns equal probability for every
+    # action and value 0.  This avoids the overhead of running a neural network.
+    def uniform_eval(state: np.ndarray):
+        # Accepts a single position (C,H,W) or batched (B,C,H,W).
+        if state.ndim == 3:  # single position
+            batch = 1
+        else:
+            batch = state.shape[0]
+
+        pi = np.full((batch, action_count), 1.0 / action_count, dtype=np.float32)
+        v = np.zeros((batch,), dtype=np.float32)
+        return pi, v
+
+    eval_random = uniform_eval
+
+    results = {
+        "fixed_wins": 0,
+        "random_wins": 0,
+        "draws": 0,
+    }
+
+    for g in range(num_games):
+        print("\n🏁 Starting game", g + 1, "/", num_games)
+
+        fixed_is_black = (g % 2 == 0)
+
+        black_eval = eval_fixed if fixed_is_black else eval_random
+        white_eval = eval_random if fixed_is_black else eval_fixed
+
+        black_sim = fixed_sim_count if fixed_is_black else random_sim_count
+        white_sim = random_sim_count if fixed_is_black else fixed_sim_count
+
+        board = FiveInARowBoard(board_size, input_dim[0] - 2)
+        root = MCTSNode(action_count, black_eval, board, 1)
+
+        move_count = 0
+        max_moves = board_size[0] * board_size[1]
+
+        while move_count < max_moves:
+            current_player = root.get_board().get_current_player()
+            if current_player == 1:
+                current_eval = black_eval
+                current_sims = black_sim
+            else:
+                current_eval = white_eval
+                current_sims = white_sim
+
+            root.policy_func = current_eval
+            root, _ = run_simulations_and_make_move(root, current_sims, temperature, add_noise)
+            
+            print(root.get_board().render())
+            print(f"Move {move_count} by {current_player}")
+            winner = root.get_board().get_winner()
+            if winner is not None:
+                break
+
+            move_count += 1
+
+        winner = root.get_board().get_winner()
+        if winner is None and move_count >= max_moves:
+            winner = 0
+
+        if winner == 0:
+            results["draws"] += 1
+            print("🤝 Draw after", move_count, "moves")
+        elif (winner == 1 and fixed_is_black) or (winner == 2 and not fixed_is_black):
+            results["fixed_wins"] += 1
+            print("✅ Fixed model wins as", "Black" if fixed_is_black else "White")
+        else:
+            results["random_wins"] += 1
+            print("❌ Random model wins as", "Black" if not fixed_is_black else "White")
+
+        print(f"Game {g + 1} result: {results}")
+
+    print("\n🎯 Tournament complete!")
+    print(results)
+
+    results.update({
+        "settings": {
+            "num_games": num_games,
+            "fixed_model_index": fixed_model_index,
+            "fixed_sim_count": fixed_sim_count,
+            "random_sim_count": random_sim_count,
+            "temperature": temperature,
+            "add_noise": add_noise,
+            "input_dim": input_dim,
+            "board_size": board_size,
+        }
+    })
+
+    return results
+
+
 def main():
     """Example usage of the battle system."""
     # Create model manager
@@ -729,26 +974,36 @@ def main():
     # input_dim = (17, 11, 11)
     input_dim = (6, 8, 8)
 
-    tournament_result = run_comprehensive_tournament(
+    # tournament_result = run_comprehensive_tournament(
+    #     model_manager=model_manager,
+    #     model_indices=[0, 200],  # Latest 3 models
+    #     games_per_match=20,  # 10 games per model pair
+    #     input_dim=input_dim,
+    #     sim_count=100,   # 100 sims per move
+    #     temperature=1.0,
+    #     add_noise=True,  # Add noise for evaluation
+    #     device=None  # Auto-detect
+    # )
+    
+    # print(f"\n🎯 Comprehensive tournament completed!")
+    # print(f"Tournament involved {len(tournament_result['model_indices'])} models: {tournament_result['model_indices']}")
+    # print(f"Total matches: {tournament_result['total_matches']}")
+    # print(f"Total games: {tournament_result['total_games']}")
+    
+    # # Find the best model
+    # best_model = max(tournament_result['model_scores'].items(), key=lambda x: x[1]['wins'])[0]
+    # print(f"🏆 Best model: Model {best_model}")
+
+    tournament_result = run_tournament_vs_untrained(
         model_manager=model_manager,
-        model_indices=[0, 200],  # Latest 3 models
-        games_per_match=20,  # 10 games per model pair
+        fixed_model_index=330,
+        num_games=10,
         input_dim=input_dim,
-        sim_count=100,   # 100 sims per move
+        fixed_sim_count=400,
+        random_sim_count=1600,
         temperature=1.0,
-        add_noise=True,  # Add noise for evaluation
-        device=None  # Auto-detect
+        add_noise=True,
+        device=None
     )
-    
-    print(f"\n🎯 Comprehensive tournament completed!")
-    print(f"Tournament involved {len(tournament_result['model_indices'])} models: {tournament_result['model_indices']}")
-    print(f"Total matches: {tournament_result['total_matches']}")
-    print(f"Total games: {tournament_result['total_games']}")
-    
-    # Find the best model
-    best_model = max(tournament_result['model_scores'].items(), key=lambda x: x[1]['wins'])[0]
-    print(f"🏆 Best model: Model {best_model}")
-
-
 if __name__ == "__main__":
     main() 
