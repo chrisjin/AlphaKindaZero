@@ -74,7 +74,7 @@ The results below are recorded in [`issues.md`](issues.md). Their checkpoint fil
 
 - A round-robin tournament of 17 checkpoints, with 64 games per checkpoint, produced win rates of 39.1%–56.2%. The newest checkpoint scored 48.4%. This run did not show a stable improvement from training.
 - A later note records a 5–0 result against checkpoint `20250712_190041` after increasing the simulation budget from 200 to 400 and further training. The short match and incomplete configuration record do not isolate the effect of either change.
-- The history includes a [Dirichlet-noise correction](https://github.com/chrisjin/AlphaKindaZero/commit/14d3404) and a subsequent [learning-rate adjustment](https://github.com/chrisjin/AlphaKindaZero/commit/132cbbb). The notes record that insufficient exploration noise had previously been treated as a learning-rate problem.
+- The history includes a [Dirichlet-noise experiments](https://github.com/chrisjin/AlphaKindaZero/commit/14d3404) and a subsequent [learning-rate adjustment](https://github.com/chrisjin/AlphaKindaZero/commit/132cbbb). The notes record that insufficient exploration noise had previously been treated as a learning-rate problem.
 - Other fixes address [optimizer parameters bound to the wrong model and a missing `train()` call](https://github.com/chrisjin/AlphaKindaZero/commit/cb125f9), as well as [player-plane encoding, tie-breaking, and draws](https://github.com/chrisjin/AlphaKindaZero/commit/b86c185).
 
 ### Known limitations
